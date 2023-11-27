@@ -3,7 +3,7 @@
 import argparse
 import glob
 import os
-
+from tqdm import tqdm
 import cv2
 import imageio
 import numpy as np
@@ -13,8 +13,12 @@ from PIL import Image
 import torchvision
 
 
-DEVICE = "cuda"
-
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
 
 def create_dir(dir):
     if not os.path.exists(dir):
@@ -78,11 +82,11 @@ def run_maskrcnn(model, img_path):
         intHeight = 1024
         intWidth = 576
 
-    image = o_image.resize((intWidth, intHeight), Image.ANTIALIAS)
+    image = o_image.resize((intWidth, intHeight), Image.Resampling.LANCZOS)
 
-    image_tensor = torchvision.transforms.functional.to_tensor(image).cuda()
+    image_tensor = torchvision.transforms.functional.to_tensor(image).to(DEVICE)
 
-    tenHumans = torch.FloatTensor(intHeight, intWidth).fill_(1.0).cuda()
+    tenHumans = torch.FloatTensor(intHeight, intWidth).fill_(1.0).to(DEVICE)
 
     objPredictions = model([image_tensor])[0]
 
@@ -149,154 +153,166 @@ def get_stats(X, norm=2):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_path", type=str, help="Dataset path")
+    parser.add_argument("--dataset_path", type=str, help="Dataset path", default='data')
     args = parser.parse_args()
     data_dir = args.dataset_path
-
-    images = sorted(glob.glob(os.path.join(data_dir, "images", "*.jpg")))
-
-    img = load_image(images[0])
-    H = img.shape[2]
-    W = img.shape[3]
-
-    # RUN SEMANTIC SEGMENTATION
-    img_path_list = sorted(glob.glob(os.path.join(data_dir, "images", "*.jpg")))
     netMaskrcnn = (
-        torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
-        .cuda()
+        torchvision.models.detection.maskrcnn_resnet50_fpn(weights="DEFAULT")
+        .to(DEVICE)
         .eval()
     )
-    mask_rcnn_masks = []
-    for i in range(0, len(img_path_list)):
-        img_path = img_path_list[i]
-        img_name = img_path.split("/")[-1]
-        print(img_path)
-        semantic_mask = run_maskrcnn(netMaskrcnn, img_path)
-        semantic_mask = cv2.resize(
-            semantic_mask, (W, H), interpolation=cv2.INTER_NEAREST
-        )
-        mask_rcnn_masks.append(semantic_mask)
 
-    uv = get_uv_grid(H, W, align_corners=False)
-    x1 = uv.reshape(-1, 2)
-    motion_mask_frames = []
-    motion_mask_frames2 = []
-    flow_for_bilateral = []
-    for idx, _ in enumerate(images):
-        print("idx: " + str(idx))
-        motion_masks = []
-        weights = []
-        err_list = []
-        normalized_flow = []
-        this_flow = 0
-        counter = 0
-        for step in [1]:
-            print("step: " + str(step))
-            if idx - step >= 0:
-                # backward flow and mask
-                bwd_flow_path = os.path.join(
-                    data_dir, "flow", str(idx).zfill(5) + "_bwd.npz"
-                )
-                bwd_data = np.load(bwd_flow_path)
-                bwd_flow, bwd_mask = bwd_data["flow"], bwd_data["mask"]
-                this_flow = np.copy(this_flow - bwd_flow)
-                counter += 1
-                bwd_flow = torch.from_numpy(bwd_flow)
-                bwd_mask = np.float32(bwd_mask)
-                bwd_mask = torch.from_numpy(bwd_mask)
-                flow = torch.from_numpy(
-                    np.stack(
-                        [
-                            2.0 * bwd_flow[..., 0] / (W - 1),
-                            2.0 * bwd_flow[..., 1] / (H - 1),
-                        ],
-                        axis=-1,
-                    )
-                )
-                normalized_flow.append(flow)
-                x2 = x1 + flow.view(-1, 2)  # (H*W, 2)
-                F, mask = cv2.findFundamentalMat(x1.numpy(), x2.numpy(), cv2.FM_LMEDS)
-                F = torch.from_numpy(F.astype(np.float32))  # (3, 3)
-                err = compute_sampson_error(x1, x2, F).reshape(H, W)
-                fac = (H + W) / 2
-                err = err * fac**2
-                err_list.append(err)
-                weights.append(bwd_mask.mean())
+    import pickle as pl
+    import numpy as np
+    myfile = "data/basketball/flow/16/00076_fwd.npz"
+    import os
 
-            if idx + step < len(images):
-                # forward flow and mask
-                fwd_flow_path = os.path.join(
-                    data_dir, "flow", str(idx).zfill(5) + "_fwd.npz"
-                )
-                fwd_data = np.load(fwd_flow_path)
-                fwd_flow, fwd_mask = fwd_data["flow"], fwd_data["mask"]
-                this_flow = np.copy(this_flow + fwd_flow)
-                counter += 1
-                fwd_flow = torch.from_numpy(fwd_flow)
-                fwd_mask = np.float32(fwd_mask)
-                fwd_mask = torch.from_numpy(fwd_mask)
-                flow = torch.from_numpy(
-                    np.stack(
-                        [
-                            2.0 * fwd_flow[..., 0] / (W - 1),
-                            2.0 * fwd_flow[..., 1] / (H - 1),
-                        ],
-                        axis=-1,
-                    )
-                )
-                normalized_flow.append(flow)
-                x2 = x1 + flow.view(-1, 2)  # (H*W, 2)
-                F, mask = cv2.findFundamentalMat(x1.numpy(), x2.numpy(), cv2.FM_LMEDS)
-                F = torch.from_numpy(F.astype(np.float32))  # (3, 3)
-                err = compute_sampson_error(x1, x2, F).reshape(H, W)
-                fac = (H + W) / 2
-                err = err * fac**2
-                err_list.append(err)
-                weights.append(fwd_mask.mean())
+    scores = {} # scores is an empty dict already
 
-        err = torch.amax(torch.stack(err_list, 0), 0)
-        flow_for_bilateral.append(this_flow / counter)
+    
 
-        thresh = torch.quantile(err, 0.8)
-        err = torch.where(err <= thresh, torch.zeros_like(err), err)
+    for seq in ['basketball']:
+      for k in range(0, 1):
+        #images = sorted(glob.glob(os.path.join(data_dir, "images", "*.jpg")))
+        images = sorted(glob.glob(os.path.join(data_dir, f"{seq}/ims/{k}", "*.jpg")))
 
-        mask = torch.from_numpy(
-            skimage.morphology.binary_opening(
-                err.numpy() > (H * W / (8100.0)), skimage.morphology.disk(1)
+        img = load_image(images[0])
+        H = img.shape[2]
+        W = img.shape[3]
+
+        # RUN SEMANTIC SEGMENTATION
+        #img_path_list = sorted(glob.glob(os.path.join(data_dir, "images", "*.jpg")))
+        img_path_list = sorted(glob.glob(os.path.join(data_dir, f"{seq}/ims/{k}", "*.jpg")))
+
+        mask_rcnn_masks = []
+        for i in range(0, len(img_path_list)):
+            img_path = img_path_list[i]
+            img_name = img_path.split("/")[-1]
+            semantic_mask = run_maskrcnn(netMaskrcnn, img_path)
+            semantic_mask = cv2.resize(
+                semantic_mask, (W, H), interpolation=cv2.INTER_NEAREST
             )
-        )  # 64.0 for nvidia, 49.0 for DAVIS_480p, 256.0 for DAVIS_1080p
-        # combine
-        mask_rcnn_mask = torch.from_numpy(mask_rcnn_masks[idx])
-        mask[mask_rcnn_mask > 1] = 1.0
+            mask_rcnn_masks.append(semantic_mask)
 
-        mask = torch.from_numpy(
-            skimage.morphology.dilation(mask.cpu(), skimage.morphology.disk(2))
-        ).float()
-        if not os.path.exists(os.path.join(data_dir, "epipolar_error_png")):
-            os.makedirs(os.path.join(data_dir, "epipolar_error_png"))
-        Image.fromarray(((mask).numpy() * 255.0).astype(np.uint8)).save(
-            os.path.join(data_dir, "epipolar_error_png", str(idx).zfill(5) + ".png")
+        uv = get_uv_grid(H, W, align_corners=False)
+        x1 = uv.reshape(-1, 2)
+        motion_mask_frames = []
+        motion_mask_frames2 = []
+        flow_for_bilateral = []
+        for idx, _ in tqdm(enumerate(images), total=len(images)):
+            motion_masks = []
+            weights = []
+            err_list = []
+            normalized_flow = []
+            this_flow = 0
+            counter = 0
+            for step in [1]:
+                if idx - step >= 0:
+                    # backward flow and mask
+                    bwd_flow_path = os.path.join(
+                        data_dir, f"{seq}/flow/{k}", str(idx).zfill(5) + "_bwd.npz"
+                    )
+                    bwd_data = np.load(bwd_flow_path)
+                    bwd_flow, bwd_mask = bwd_data["flow"], bwd_data["mask"]
+                    this_flow = np.copy(this_flow - bwd_flow)
+                    counter += 1
+                    bwd_flow = torch.from_numpy(bwd_flow)
+                    bwd_mask = np.float32(bwd_mask)
+                    bwd_mask = torch.from_numpy(bwd_mask)
+                    flow = torch.from_numpy(
+                        np.stack(
+                            [
+                                2.0 * bwd_flow[..., 0] / (W - 1),
+                                2.0 * bwd_flow[..., 1] / (H - 1),
+                            ],
+                            axis=-1,
+                        )
+                    )
+                    normalized_flow.append(flow)
+                    x2 = x1 + flow.view(-1, 2)  # (H*W, 2)
+                    F, mask = cv2.findFundamentalMat(x1.numpy(), x2.numpy(), cv2.FM_LMEDS)
+                    F = torch.from_numpy(F.astype(np.float32))  # (3, 3)
+                    err = compute_sampson_error(x1, x2, F).reshape(H, W)
+                    fac = (H + W) / 2
+                    err = err * fac**2
+                    err_list.append(err)
+                    weights.append(bwd_mask.mean())
+
+                if idx + step < len(images):
+                    # forward flow and mask
+                    fwd_flow_path = os.path.join(
+                        data_dir, f"{seq}/flow/{k}", str(idx).zfill(5) + "_fwd.npz"
+                    )
+                    fwd_data = np.load(fwd_flow_path, allow_pickle=True)
+                    fwd_flow, fwd_mask = fwd_data["flow"], fwd_data["mask"]
+                    this_flow = np.copy(this_flow + fwd_flow)
+                    counter += 1
+                    fwd_flow = torch.from_numpy(fwd_flow)
+                    fwd_mask = np.float32(fwd_mask)
+                    fwd_mask = torch.from_numpy(fwd_mask)
+                    flow = torch.from_numpy(
+                        np.stack(
+                            [
+                                2.0 * fwd_flow[..., 0] / (W - 1),
+                                2.0 * fwd_flow[..., 1] / (H - 1),
+                            ],
+                            axis=-1,
+                        )
+                    )
+                    normalized_flow.append(flow)
+                    x2 = x1 + flow.view(-1, 2)  # (H*W, 2)
+                    F, mask = cv2.findFundamentalMat(x1.numpy(), x2.numpy(), cv2.FM_LMEDS)
+                    F = torch.from_numpy(F.astype(np.float32))  # (3, 3)
+                    err = compute_sampson_error(x1, x2, F).reshape(H, W)
+                    fac = (H + W) / 2
+                    err = err * fac**2
+                    err_list.append(err)
+                    weights.append(fwd_mask.mean())
+
+            err = torch.amax(torch.stack(err_list, 0), 0)
+            flow_for_bilateral.append(this_flow / counter)
+
+            thresh = torch.quantile(err, 0.8)
+            err = torch.where(err <= thresh, torch.zeros_like(err), err)
+
+            mask = torch.from_numpy(
+                skimage.morphology.binary_opening(
+                    err.numpy() > (H * W / (8100.0)), skimage.morphology.disk(1)
+                )
+            )  # 64.0 for nvidia, 49.0 for DAVIS_480p, 256.0 for DAVIS_1080p
+            # combine
+            mask_rcnn_mask = torch.from_numpy(mask_rcnn_masks[idx])
+            mask[mask_rcnn_mask > 1] = 1.0
+
+            mask = torch.from_numpy(
+                skimage.morphology.dilation(mask.cpu(), skimage.morphology.disk(2))
+            ).float()
+            if not os.path.exists(os.path.join(data_dir, f"{seq}/epipolar_error_png/{k}")):
+                os.makedirs(os.path.join(data_dir, f"{seq}/epipolar_error_png/{k}"))
+            Image.fromarray(((mask).numpy() * 255.0).astype(np.uint8)).save(
+                os.path.join(data_dir, f"{seq}/epipolar_error_png/{k}", str(idx).zfill(5) + ".png")
+            )
+
+            motion_mask_frames.append(err / err.max())
+            motion_mask_frames2.append(mask)
+
+        '''motion_mask_frames = [(x / x.max()).numpy() for x in motion_mask_frames]
+        imageio.mimwrite(
+            os.path.join(data_dir, f"{seq}/epipolar_error.mp4"),
+            np.stack(motion_mask_frames),
+            fps=30,
+            quality=10,
+            format="ffmpeg",
+            output_params=["-f", "mp4"],
         )
 
-        motion_mask_frames.append(err / err.max())
-        motion_mask_frames2.append(mask)
+        motion_mask_frames2 = [(x).numpy() for x in motion_mask_frames2]
+        imageio.mimwrite(
+            os.path.join(data_dir, f"{seq}/epipolar_error_png.mp4"),
+            np.stack(motion_mask_frames2),
+            fps=30,
+            quality=10,
+            format="ffmpeg",
+            output_params=["-f", "mp4"],
+        )'''
 
-    motion_mask_frames = [(x / x.max()).numpy() for x in motion_mask_frames]
-    imageio.mimwrite(
-        os.path.join(data_dir, "epipolar_error.mp4"),
-        np.stack(motion_mask_frames),
-        fps=30,
-        quality=10,
-        format="ffmpeg",
-        output_params=["-f", "mp4"],
-    )
-
-    motion_mask_frames2 = [(x).numpy() for x in motion_mask_frames2]
-    imageio.mimwrite(
-        os.path.join(data_dir, "epipolar_error_png.mp4"),
-        np.stack(motion_mask_frames2),
-        fps=30,
-        quality=10,
-        format="ffmpeg",
-        output_params=["-f", "mp4"],
-    )
