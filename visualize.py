@@ -139,7 +139,7 @@ def rgbd2pcd(im, depth, w2c, k, show_depth=False, project_to_cam_w_scale=None):
 
 def visualize(seq, exp):
     scene_data, is_fg = load_scene_data(seq, exp)
-
+    o3d.visualization.webrtc_server.enable_webrtc()
     vis = o3d.visualization.Visualizer()
     vis.create_window(width=int(w * view_scale), height=int(h * view_scale), visible=True)
 

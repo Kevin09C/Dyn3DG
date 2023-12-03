@@ -162,10 +162,6 @@ if __name__ == "__main__":
         .eval()
     )
 
-    import pickle as pl
-    import numpy as np
-    myfile = "data/basketball/flow/16/00076_fwd.npz"
-    import os
 
     scores = {} # scores is an empty dict already
 

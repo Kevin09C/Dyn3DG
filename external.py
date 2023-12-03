@@ -187,7 +187,7 @@ def densify(params, variables, optimizer, i):
             samples = torch.normal(mean=means, std=stds)
             rots = build_rotation(params['unnorm_rotations'][to_split]).repeat(n, 1, 1)
             new_params['means3D'] += torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1)
-            new_params['log_scales'] = torch.log(torch.exp(new_params['log_scales']) / (0.8 * n))
+            new_params['log_scales'] =  torch.log(torch.exp(new_params['log_scales']) / (0.8 * n))
             params = cat_params_to_optimizer(new_params, params, optimizer)
             num_pts = params['means3D'].shape[0]
 

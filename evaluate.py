@@ -29,9 +29,9 @@ def calc_metrics(rendervar, data, params, t, seq, i):
     im, _, _, = Renderer(raster_settings=data['cam'])(**rendervar)
     curr_id = data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
-    save_image(im, f'./data/{seq}/rendered/test_time_img/timestep_{t}_img_{i}.png')
-    psnr = calc_psnr(im, data['im']).mean()
-    ssim = calc_ssim(im, data['im']).mean()
+    save_image(im, f'./data/{seq}/rendered/reproduce/timestep_{t}_img_{i}.png')
+    psnr = calc_psnr(im, data['im']).mean().item()
+    ssim = calc_ssim(im, data['im']).mean().item()
     return psnr, ssim
 
 
@@ -40,14 +40,16 @@ def evaluate(seq, exp):
     num_timesteps = len(md['fn'])
     params = dict(np.load(f"./output/{exp}/{seq}/params.npz"))
     params = {k: torch.tensor(v).cuda().float() for k, v in params.items()}
+    print(params.keys())
     psnr_arr = []
     ssim_arr = []
+    seg_as_col = False
     with torch.no_grad():
         for t in range(num_timesteps):
             dataset = get_dataset(t, md, seq)
             rendervar = {
                 'means3D': params['means3D'][t],
-                'colors_precomp': params['rgb_colors'][t],
+                'colors_precomp': params['rgb_colors'][t] if not seg_as_col else params['seg_colors'],
                 'rotations': torch.nn.functional.normalize(params['unnorm_rotations'][t]),
                 'opacities': torch.sigmoid(params['logit_opacities']),
                 'scales': torch.exp(params['log_scales']),
@@ -63,6 +65,7 @@ def evaluate(seq, exp):
         print(f"Sequence: {seq} \t\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}}")
 
 if __name__ == "__main__":
-    exp_name = "exp1"
-    for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
+    exp_name = "reproduce"
+    #for sequence in ["football", "juggle", "softball"]:
+    for sequence in ["basketball", "boxes",]:# "football", "juggle", "softball", "tennis"]:
         evaluate(sequence, exp_name)

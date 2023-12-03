@@ -102,7 +102,7 @@ def get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_m
         losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
 
     if (t == 0 and i == 9999) or (t > 0 and i == 1999):
-        save_image(im, f'./data/{seq}/rendered/img/timestep_{t}_img_{i}.png')
+        save_image(im, f'./data/{seq}/reproduce/img/timestep_{t}_img_{i}.png')
 
     if not is_initial_timestep:
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
@@ -215,7 +215,7 @@ def train(seq, exp):
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             curr_data = get_batch(todo_dataset, dataset)
-            loss, variables = get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_maskrcnn_masks=True)
+            loss, variables = get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_maskrcnn_masks=False)
             loss.backward()
             with torch.no_grad():
                 report_progress(params, dataset[0], i, progress_bar)
@@ -231,7 +231,7 @@ def train(seq, exp):
 
 
 if __name__ == "__main__":
-    exp_name = "exp1"
+    exp_name = "reproduce"
     for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
         train(sequence, exp_name)
         torch.cuda.empty_cache()
