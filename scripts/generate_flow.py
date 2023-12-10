@@ -15,7 +15,7 @@ import torchvision.transforms as T
 
 from flow_utils import *
 
-DEVICE = "mps"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def create_dir(dir):
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     
-    for seq in ['basketball', 'boxes', 'football', 'juggle', 'softball', 'tennis']:
+    for seq in ['basketball', 'boxes',, 'football', 'juggle', 'softball', 'tennis']:
         for i in range(0, 31):
             input_path = os.path.join(args.dataset_path, f"{seq}/ims/{i}")
             output_path = os.path.join(args.dataset_path, f"{seq}/flow/{i}")

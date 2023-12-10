@@ -10,7 +10,7 @@ from diff_gaussian_rasterization import GaussianRasterizer as Renderer
 from helpers import setup_camera, l1_loss_v1, l1_loss_v2, weighted_l2_loss_v1, weighted_l2_loss_v2, quat_mult, \
     o3d_knn, params2rendervar, params2cpu, save_params
 from external import calc_ssim, calc_psnr, build_rotation, densify, update_params_and_optimizer
-
+from torchvision.utils import save_image
 
 def get_dataset(t, md, seq):
     dataset = []
@@ -20,10 +20,16 @@ def get_dataset(t, md, seq):
         fn = md['fn'][t][c]
         im = np.array(copy.deepcopy(Image.open(f"./data/{seq}/ims/{fn}")))
         im = torch.tensor(im).float().cuda().permute(2, 0, 1) / 255
+
+        #masks from maskrccn
+        epi = np.array(copy.deepcopy(Image.open(f"./data/{seq}/epipolar_error_png/{fn.replace('.jpg', '.png')}"))) #masks from RAFT+MASKRCNN
+        epi = torch.tensor(epi).float().cuda()             #convert to tensor
+        epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
+
         seg = np.array(copy.deepcopy(Image.open(f"./data/{seq}/seg/{fn.replace('.jpg', '.png')}"))).astype(np.float32)
         seg = torch.tensor(seg).float().cuda()
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
-        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c})
+        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'epi': epi_col, 'id': c})
     return dataset
 
 
@@ -76,7 +82,7 @@ def initialize_optimizer(params, variables):
     return torch.optim.Adam(param_groups, lr=0.0, eps=1e-15)
 
 
-def get_loss(params, curr_data, variables, is_initial_timestep):
+def get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_maskrcnn_masks = False):
     losses = {}
 
     rendervar = params2rendervar(params)
@@ -90,7 +96,13 @@ def get_loss(params, curr_data, variables, is_initial_timestep):
     segrendervar = params2rendervar(params)
     segrendervar['colors_precomp'] = params['seg_colors']
     seg, _, _, = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
-    losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
+    if use_maskrcnn_masks:
+        losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['epi']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['epi']))
+    else: 
+        losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
+
+    if (t == 0 and i == 9999) or (t > 0 and i == 1999):
+        save_image(im, f'./data/{seq}/reproduce/img/timestep_{t}_img_{i}.png')
 
     if not is_initial_timestep:
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
@@ -203,7 +215,7 @@ def train(seq, exp):
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             curr_data = get_batch(todo_dataset, dataset)
-            loss, variables = get_loss(params, curr_data, variables, is_initial_timestep)
+            loss, variables = get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_maskrcnn_masks=False)
             loss.backward()
             with torch.no_grad():
                 report_progress(params, dataset[0], i, progress_bar)
@@ -219,7 +231,7 @@ def train(seq, exp):
 
 
 if __name__ == "__main__":
-    exp_name = "exp1"
+    exp_name = "reproduce"
     for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
         train(sequence, exp_name)
         torch.cuda.empty_cache()
