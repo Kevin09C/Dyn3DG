@@ -9,6 +9,10 @@ from external import build_rotation
 from colormap import colormap
 from copy import deepcopy
 
+o3d.visualization.webrtc_server.enable_webrtc()
+
+FILEPATH = "/home/sharma/src/Dyn3DG"
+
 RENDER_MODE = 'color'  # 'color', 'depth' or 'centers'
 # RENDER_MODE = 'depth'  # 'color', 'depth' or 'centers'
 # RENDER_MODE = 'centers'  # 'color', 'depth' or 'centers'
@@ -45,7 +49,7 @@ def init_camera(y_angle=0., center_dist=2.4, cam_height=1.3, f_ratio=0.82):
 
 
 def load_scene_data(seq, exp, seg_as_col=False):
-    params = dict(np.load(f"./output/{exp}/{seq}/params.npz"))
+    params = dict(np.load(f"{FILEPATH}/output/{exp}/{seq}/params.npz"))
     params = {k: torch.tensor(v).cuda().float() for k, v in params.items()}
     is_fg = params['seg_colors'][:, 0] > 0.5
     scene_data = []
@@ -141,7 +145,7 @@ def visualize(seq, exp):
     scene_data, is_fg = load_scene_data(seq, exp)
     o3d.visualization.webrtc_server.enable_webrtc()
     vis = o3d.visualization.Visualizer()
-    vis.create_window(width=int(w * view_scale), height=int(h * view_scale), visible=True)
+    # vis.create_window(width=int(w * view_scale), height=int(h * view_scale), visible=True)
 
     w2c, k = init_camera()
     im, depth = render(w2c, k, scene_data[0])
@@ -166,13 +170,14 @@ def visualize(seq, exp):
 
     view_k = k * view_scale
     view_k[2, 2] = 1
-    view_control = vis.get_view_control()
+    # view_control = vis.get_view_control()
+    # breakpoint()
     cparams = o3d.camera.PinholeCameraParameters()
     cparams.extrinsic = w2c
     cparams.intrinsic.intrinsic_matrix = view_k
     cparams.intrinsic.height = int(h * view_scale)
     cparams.intrinsic.width = int(w * view_scale)
-    view_control.convert_from_pinhole_camera_parameters(cparams, allow_arbitrary=True)
+    # view_control.convert_from_pinhole_camera_parameters(cparams, allow_arbitrary=True)
 
     render_options = vis.get_render_option()
     render_options.point_size = view_scale
@@ -192,11 +197,11 @@ def visualize(seq, exp):
             num_loops = 1.4
             y_angle = 360*t*num_loops / num_timesteps
             w2c, k = init_camera(y_angle)
-            cam_params = view_control.convert_to_pinhole_camera_parameters()
+            # cam_params = view_control.convert_to_pinhole_camera_parameters()
             cam_params.extrinsic = w2c
-            view_control.convert_from_pinhole_camera_parameters(cam_params, allow_arbitrary=True)
+            # view_control.convert_from_pinhole_camera_parameters(cam_params, allow_arbitrary=True)
         else:  # Interactive control
-            cam_params = view_control.convert_to_pinhole_camera_parameters()
+            # cam_params = view_control.convert_to_pinhole_camera_parameters()
             view_k = cam_params.intrinsic.intrinsic_matrix
             k = view_k / view_scale
             k[2, 2] = 1
@@ -227,12 +232,12 @@ def visualize(seq, exp):
         vis.update_renderer()
 
     vis.destroy_window()
-    del view_control
+    # del view_control
     del vis
     del render_options
 
 
 if __name__ == "__main__":
-    exp_name = "exp1"
+    exp_name = "exp2_seg_of1"
     for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
         visualize(sequence, exp_name)

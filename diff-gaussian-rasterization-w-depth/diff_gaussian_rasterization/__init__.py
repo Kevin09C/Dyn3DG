@@ -35,6 +35,7 @@ def rasterize_gaussians(
         rotations,
         cov3Ds_precomp,
         raster_settings,
+        # add n_contrib here?              
     )
 
 class _RasterizeGaussians(torch.autograd.Function):
