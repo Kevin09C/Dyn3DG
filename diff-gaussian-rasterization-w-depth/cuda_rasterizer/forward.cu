@@ -272,7 +272,8 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
 	const float* __restrict__ depth,
-	float* __restrict__ out_depth)
+	float* __restrict__ out_depth,
+	float* __restrict__ out_contrib)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -389,6 +390,7 @@ renderCUDA(
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_depth[pix_id] = D;
+		out_contrib[pix_id] = last_contributor;
 	}
 }
 
@@ -405,7 +407,8 @@ void FORWARD::render(
 	const float* bg_color,
 	float* out_color,
 	const float* depth,
-	float* out_depth)
+	float* out_depth,
+	float* out_contrib)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -419,7 +422,8 @@ void FORWARD::render(
 		bg_color,
 		out_color,
 		depth,
-		out_depth);
+		out_depth,
+		out_contrib);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
