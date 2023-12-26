@@ -30,5 +30,6 @@ setup(
         ],
     cmdclass={
         'build_ext': BuildExtension
-    }
+    },
+    version="0.1.0", 
 )
