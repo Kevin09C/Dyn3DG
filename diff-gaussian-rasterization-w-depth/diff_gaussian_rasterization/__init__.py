@@ -12,6 +12,7 @@
 from typing import NamedTuple
 import torch.nn as nn
 import torch
+# from diff_gaussian_rasterization import _C
 from . import _C
 
 def rasterize_gaussians(
@@ -86,7 +87,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         return color, radii, depth, n_contrib
 
     @staticmethod
-    def backward(ctx, grad_out_color, _, depth):
+    def backward(ctx, grad_out_color, _, depth, n_contrib):
 
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
