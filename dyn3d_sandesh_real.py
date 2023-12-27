@@ -126,9 +126,10 @@ def get_dataset(t, md, seq):
 
 
 def get_batch(todo_dataset, dataset):
+    if "counter" not in get_batch.__dict__: get_batch.counter = 0
     if not todo_dataset:
         todo_dataset = dataset.copy()
-    curr_data = todo_dataset.pop(randint(0, len(todo_dataset) - 1))
+    curr_data = todo_dataset.pop()
     return curr_data
 
 def get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset):
@@ -137,9 +138,9 @@ def get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, 
         todo_prev_dataset = prev_dataset.copy()
 
     assert len(todo_curr_dataset) == len(todo_prev_dataset)
-    index = randint(0, len(todo_curr_dataset) - 1)
-    curr_data = todo_curr_dataset.pop(index)
-    prev_data = todo_prev_dataset.pop(index)
+    index = get_batch.counter #randint(0, len(todo_curr_dataset) - 1)
+    curr_data = todo_curr_dataset.pop()
+    prev_data = todo_prev_dataset.pop()
     return curr_data, prev_data
 
 
@@ -196,17 +197,17 @@ def compute_of_seg_loss(of_model, rendered_im, curr_data, prev_data, i, t):
   flow_im_rendered  = flow_to_image(flows_of_rendered)
   flow_im_curr      = flow_to_image(flows_of_curr)
 
-  if i == 1:
-    save_path = os.path.join(sandesh_path, str(t), str(i))
-    if not os.path.exists(save_path):
-        os.makedirs(save_path, exist_ok=True)
-    #   torchvision.to_tensor(flow_im_rendered)
-    save_image(flow_im_rendered.float() / 255.0, save_path + "/flow_im_rendered.png")
-    save_image(flow_im_curr.float() / 255.0, save_path + "/flow_im_curr.png")
-    save_image(processed_curr_im, save_path + "/original.png")
-    save_image(processed_rendered_im, save_path + "/rendered.png")
-    print("img min max", flow_im_rendered.max(), flow_im_rendered.min())
-    print("saving image to " + save_path)
+#   if i == 1:
+#     save_path = os.path.join(sandesh_path, str(t), str(i))
+#     if not os.path.exists(save_path):
+#         os.makedirs(save_path, exist_ok=True)
+#     #   torchvision.to_tensor(flow_im_rendered)
+#     save_image(flow_im_rendered.float() / 255.0, save_path + "/flow_im_rendered.png")
+#     save_image(flow_im_curr.float() / 255.0, save_path + "/flow_im_curr.png")
+#     save_image(processed_curr_im, save_path + "/original.png")
+#     save_image(processed_rendered_im, save_path + "/rendered.png")
+#     print("img min max", flow_im_rendered.max(), flow_im_rendered.min())
+#     print("saving image to " + save_path)
 
   return 0.8 * l1_loss_v1(flow_im_rendered.to(torch.float),
                           flow_im_curr.to(torch.float)) + 0.2 * (1.0 - calc_ssim(flow_im_rendered.to(torch.float), flow_im_curr.to(torch.float)))
@@ -262,13 +263,11 @@ from torchvision.utils import save_image
 
 last_contrib = None
 
-def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number):
+def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp):
     losses = {}
     rendervar = params2rendervar(params)
     rendervar['means2D'].retain_grad()
-    # breakpoint()
     im, radius, depth, contrib = Renderer(raster_settings=curr_data['cam'])(**rendervar)
-    # breakpoint()
     # if i % 100 == 0:
     #   save_image(im, f'{sandesh_path}/{t}_im_{i}_{img_number}.png')
     curr_id = curr_data['id']
@@ -281,18 +280,43 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
     if i == 1999:
-        breakpoint()
+        save_path = os.path.join(sandesh_path, exp, str(t), str(i))
+        if not os.path.exists(save_path):
+            os.makedirs(save_path, exist_ok=True)
+        save_image(seg.float() / 255.0, save_path + "/seg.png")
+        print("saving image to " + save_path)
+        # save contrib & contrib diff
+        save_image(contrib.float() / contrib.max(), save_path + "/contrib.png")
+        this_t_last = f'n_contrib_last_{t}'
+        last_t_last = f'n_contrib_last_{t-1}'
+        if this_t_last in variables and variables[this_t_last] is not None:
+            print("we have last iteration")
+            save_image(variables[this_t_last].float() / variables[this_t_last].max(), save_path + "/contrib_last_i.png")
+            diff = (contrib - variables[this_t_last])
+            save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_i.png")
+        if last_t_last in variables and variables[last_t_last] is not None:
+            print("we have data from last timestep")
+            save_image(variables[last_t_last].float() / variables[last_t_last].max(), save_path + "/contrib_last_t.png")
+            diff = (contrib - variables[last_t_last])
+            save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_t.png")
+            # show as binary image
+            save_image((diff != 0).float(), save_path + "/contrib_diff_last_t_binary.png")
+        if t == 3:
+            breakpoint()
     # there is no optical flow at time step 0, therefore we rely on the segmentation masks
     losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
-    if not is_initial_timestep:
-      losses['optical_flow'] = compute_of_seg_loss(of_model, im, curr_data, prev_data, i, t)
+    # if not is_initial_timestep:
+    #   losses['optical_flow'] = compute_of_seg_loss(of_model, im, curr_data, prev_data, i, t)
 
     #error with generated masks from MaskRCNN and Optical Flow
     #losses['epi'] = 0.8 * l1_loss_v1(seg, curr_data['epi']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['epi']))
-    breakpoint()
+    # breakpoint()
+    # if 'n_contrib_last' in variables and variables['n_contrib_last'] is not None:
+    #     contrib_diff = contrib - variables['n_contrib_last']
+    #     breakpoint()
+
     if not is_initial_timestep:
-        contrib_diff = contrib - last_contrib
-        breakpoint()
+        
 
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
         fg_pts = rendervar['means3D'][is_fg]
@@ -324,14 +348,15 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         #losses['optical_flow']  = compute_optical_flow_loss(of_model, im, curr_data, prev_data)
 
     loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
+                    'soft_col_cons': 0.01, 'seg': 3.0}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
 
     seen = radius > 0
     variables['max_2D_radius'][seen] = torch.max(radius[seen], variables['max_2D_radius'][seen])
     variables['seen'] = seen
-    last_contrib = contrib
+    variables[f'n_contrib_last_{t}'] = contrib
+    # breakpoint()
     return loss, variables
 
 
@@ -420,7 +445,7 @@ def train(seq, exp):
                 prev_data = None
             else:
                 prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
-            loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number)
+            loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp)
             loss.backward()
             if i == 1999:
               img_number += 1
