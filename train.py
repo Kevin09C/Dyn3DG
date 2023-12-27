@@ -29,7 +29,12 @@ def get_dataset(t, md, seq):
         seg = np.array(copy.deepcopy(Image.open(f"./data/{seq}/seg/{fn.replace('.jpg', '.png')}"))).astype(np.float32)
         seg = torch.tensor(seg).float().cuda()
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
-        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'epi': epi_col, 'id': c})
+
+        sam_mask = np.array(copy.deepcopy(Image.open(f"./data/{seq}/sam_mask/{fn.replace('.jpg', '.jpg')}"))).astype(np.float32)
+        sam_mask = torch.tensor(sam_mask).float().cuda()
+        sam_mask_col = torch.stack((sam_mask, torch.zeros_like(sam_mask), 1 - sam_mask))
+        
+        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'sam_mask': sam_mask_col ,'epi': epi_col, 'id': c})
     return dataset
 
 
@@ -99,10 +104,10 @@ def get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_m
     if use_maskrcnn_masks:
         losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['epi']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['epi']))
     else: 
-        losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
+        losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['sam_mask']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['sam_mask']))
 
     if (t == 0 and i == 9999) or (t > 0 and i == 1999):
-        save_image(im, f'./data/{seq}/reproduce/img/timestep_{t}_img_{i}.png')
+        save_image(im, f'./data/{seq}/sam_mask_exp/img/timestep_{t}_img_{i}.png')
 
     if not is_initial_timestep:
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
@@ -202,6 +207,7 @@ def train(seq, exp):
         return
     md = json.load(open(f"./data/{seq}/train_meta.json", 'r'))  # metadata
     num_timesteps = len(md['fn'])
+    print(num_timesteps)
     params, variables = initialize_params(seq, md)
     optimizer = initialize_optimizer(params, variables)
     output_params = []
@@ -231,7 +237,7 @@ def train(seq, exp):
 
 
 if __name__ == "__main__":
-    exp_name = "reproduce"
-    for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
+    exp_name = "sam_seg_2"
+    for sequence in ["basketball"]:
         train(sequence, exp_name)
         torch.cuda.empty_cache()

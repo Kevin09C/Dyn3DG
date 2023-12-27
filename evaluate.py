@@ -29,7 +29,7 @@ def calc_metrics(rendervar, data, params, t, seq, i):
     im, _, _, = Renderer(raster_settings=data['cam'])(**rendervar)
     curr_id = data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
-    save_image(im, f'./data/{seq}/rendered/reproduce/timestep_{t}_img_{i}.png')
+    save_image(im, f'./data/{seq}/rendered/sam_seg/timestep_{t}_img_{i}.png')
     psnr = calc_psnr(im, data['im']).mean().item()
     ssim = calc_ssim(im, data['im']).mean().item()
     return psnr, ssim
@@ -65,7 +65,7 @@ def evaluate(seq, exp):
         print(f"Sequence: {seq} \t\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}}")
 
 if __name__ == "__main__":
-    exp_name = "reproduce"
+    exp_name = "sam_seg_2"
     #for sequence in ["football", "juggle", "softball"]:
-    for sequence in ["basketball", "boxes",]:# "football", "juggle", "softball", "tennis"]:
+    for sequence in ["basketball"]:# "football", "juggle", "softball", "tennis"]:
         evaluate(sequence, exp_name)
