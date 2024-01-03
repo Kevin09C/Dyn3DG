@@ -38,7 +38,8 @@ def params2rendervar(params):
         'rotations': torch.nn.functional.normalize(params['unnorm_rotations']),
         'opacities': torch.sigmoid(params['logit_opacities']),
         'scales': torch.exp(params['log_scales']),
-        'means2D': torch.zeros_like(params['means3D'], requires_grad=True, device="cuda") + 0
+        # 'means2D': torch.zeros_like(params['means3D'], requires_grad=True, device="cuda") + 0,
+        'actual_means2D': torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda")
     }
     return rendervar
 

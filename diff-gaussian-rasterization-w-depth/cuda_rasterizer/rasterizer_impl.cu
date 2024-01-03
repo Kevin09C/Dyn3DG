@@ -203,6 +203,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* background,
 	const int width, int height,
 	const float* means3D,
+	const float* means2D,
 	const float* shs,
 	const float* colors_precomp,
 	const float* opacities,
@@ -273,6 +274,13 @@ int CudaRasterizer::Rasterizer::forward(
 		prefiltered
 	);
 
+	// std::cout << "means2D: " << std::endl;
+	// std::cout << "width: " << width << " height: " << height << std::endl;
+	// std::cout << geomState.means2D << std::endl;
+	// for (int i = 5; i < 10; i++) {
+		// std::cout << geomState.means2D[i].x << " " << geomState.means2D[i].y << std::endl;
+	// }
+
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
 	cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size,
@@ -337,6 +345,11 @@ int CudaRasterizer::Rasterizer::forward(
 		out_depth,
 		out_contrib);
 
+	// std::cout << "Rendered " << num_rendered << " Gaussians." << std::endl;
+	// print means2d 
+
+
+	// means2D = geomState.means2D;
 	return num_rendered;
 }
 

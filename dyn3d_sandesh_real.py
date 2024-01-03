@@ -266,14 +266,15 @@ last_contrib = None
 def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp):
     losses = {}
     rendervar = params2rendervar(params)
-    rendervar['means2D'].retain_grad()
+    rendervar['actual_means2D'].retain_grad()
     im, radius, depth, contrib = Renderer(raster_settings=curr_data['cam'])(**rendervar)
+    # breakpoint()
     # if i % 100 == 0:
     #   save_image(im, f'{sandesh_path}/{t}_im_{i}_{img_number}.png')
     curr_id = curr_data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
     losses['im'] = 0.8 * l1_loss_v1(im, curr_data['im']) + 0.2 * (1.0 - calc_ssim(im, curr_data['im']))
-    variables['means2D'] = rendervar['means2D']  # Gradient only accum from colour render for densification
+    variables['means2D'] = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
 
     segrendervar = params2rendervar(params)
     segrendervar['colors_precomp'] = params['seg_colors']
@@ -461,7 +462,7 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp2_seg_of3'
+exp_name = 'exp_of_debug2'
 # "basketball", "boxes", 
 for sequence in ["football", "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
