@@ -288,8 +288,22 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         print("saving image to " + save_path)
         # save contrib & contrib diff
         save_image(contrib.float() / contrib.max(), save_path + "/contrib.png")
+        # save raw image
+        save_image(im.float() / (im.median() * 2), save_path + "/im.png")
+        # save ground truth
+        save_image(curr_data['im'].float() / (curr_data['im'].median() * 2), save_path + "/gt.png")
         this_t_last = f'n_contrib_last_{t}'
         last_t_last = f'n_contrib_last_{t-1}'
+        means_positions = torch.zeros_like(im)
+        # iterate over means2D and increase pixel value at that position
+        for mean in variables['means2D']:
+            # check if mean is in the image
+            if mean[1] < 0 or mean[1] >= im.shape[1] or mean[0] < 0 or mean[0] >= im.shape[2]:
+                continue
+            means_positions[0, int(mean[1]), int(mean[0])] += 1
+        save_image(means_positions.float() / means_positions.max(), save_path + "/means_positions_max.png")
+        save_image(means_positions.float() / means_positions.median(), save_path + "/means_positions_median.png")
+
         if this_t_last in variables and variables[this_t_last] is not None:
             print("we have last iteration")
             save_image(variables[this_t_last].float() / variables[this_t_last].max(), save_path + "/contrib_last_i.png")
@@ -304,6 +318,11 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image((diff != 0).float(), save_path + "/contrib_diff_last_t_binary.png")
         if t == 3:
             breakpoint()
+            means_positions = torch.zeros_like(im)
+            # iterate over means2D and increase pixel value at that position
+            for mean in variables['means2D']:
+                means_positions[0, int(mean[1]), int(mean[0])] += 1
+            save_image(means_positions.float() / means_positions.max(), save_path + "/means_positions.png")
     # there is no optical flow at time step 0, therefore we rely on the segmentation masks
     losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
     # if not is_initial_timestep:
@@ -462,9 +481,9 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_debug2'
+exp_name = 'exp_of_debug3'
 # "basketball", "boxes", 
-for sequence in ["football", "juggle", "softball", "tennis"]:
+for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
     torch.cuda.empty_cache()
     #/content/gdrive/MyDrive/Dyn3DG/data/basketball/epipolar_error_png/1/00000.png
