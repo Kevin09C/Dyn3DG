@@ -279,12 +279,15 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     segrendervar = params2rendervar(params)
     segrendervar['colors_precomp'] = params['seg_colors']
 
+    visible_ids = contrib.unique().long()
+    visible_means2d = rendervar['actual_means2D'][visible_ids]
+
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
     if i == 1999:
         save_path = os.path.join(sandesh_path, exp, str(t), str(i))
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
-        save_image(seg.float() / 255.0, save_path + "/seg.png")
+        # save_image(seg.float() / 255.0, save_path + "/seg.png")
         print("saving image to " + save_path)
         # save contrib & contrib diff
         save_image(contrib.float() / contrib.max(), save_path + "/contrib.png")
@@ -292,8 +295,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         save_image(im.float() / (im.median() * 2), save_path + "/im.png")
         # save ground truth
         save_image(curr_data['im'].float() / (curr_data['im'].median() * 2), save_path + "/gt.png")
-        this_t_last = f'n_contrib_last_{t}'
-        last_t_last = f'n_contrib_last_{t-1}'
+
         means_positions = torch.zeros_like(im)
         # iterate over means2D and increase pixel value at that position
         for mean in variables['means2D']:
@@ -304,25 +306,54 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         save_image(means_positions.float() / means_positions.max(), save_path + "/means_positions_max.png")
         save_image(means_positions.float() / means_positions.median(), save_path + "/means_positions_median.png")
 
-        if this_t_last in variables and variables[this_t_last] is not None:
-            print("we have last iteration")
-            save_image(variables[this_t_last].float() / variables[this_t_last].max(), save_path + "/contrib_last_i.png")
-            diff = (contrib - variables[this_t_last])
-            save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_i.png")
-        if last_t_last in variables and variables[last_t_last] is not None:
-            print("we have data from last timestep")
-            save_image(variables[last_t_last].float() / variables[last_t_last].max(), save_path + "/contrib_last_t.png")
-            diff = (contrib - variables[last_t_last])
-            save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_t.png")
-            # show as binary image
-            save_image((diff != 0).float(), save_path + "/contrib_diff_last_t_binary.png")
-        if t == 3:
-            breakpoint()
-            means_positions = torch.zeros_like(im)
-            # iterate over means2D and increase pixel value at that position
-            for mean in variables['means2D']:
-                means_positions[0, int(mean[1]), int(mean[0])] += 1
-            save_image(means_positions.float() / means_positions.max(), save_path + "/means_positions.png")
+        ## save visible means 2d
+        visible_means2d = rendervar['actual_means2D'][visible_ids]
+        visible_means_positions = torch.zeros_like(im)
+        # iterate over means2D and increase pixel value at that position
+        for mean in visible_means2d:
+            # check if mean is in the image
+            if mean[1] < 0 or mean[1] >= im.shape[1] or mean[0] < 0 or mean[0] >= im.shape[2]:
+                continue
+            visible_means_positions[0, int(mean[1]), int(mean[0])] += 1
+        save_image(visible_means_positions.float() / visible_means_positions.max(), save_path + "/visible_means_positions_max.png")
+        save_image(visible_means_positions.float() / visible_means_positions.median(), save_path + "/visible_means_positions_median.png")
+
+        # calculate optical flow from the difference in visible means2d
+        print("saving optical flow")
+        flow, mask = compute_optical_flow_gaussians(visible_means2d, variables["prev_means2d"][visible_ids], im.shape)
+
+        # convert to colored of image
+        flow_img = flow_to_image(flow) # return shape is [3hw]            
+        save_image(flow_img.float() / 255.0, save_path + "/flow.png")
+        # mask out all pixels that are not in the image
+        mask = mask.unsqueeze(0).repeat(3, 1, 1)
+        masked_flow = flow_img * mask.float()
+        save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
+
+        # also calculate optical flow from first means2d
+        flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, variables["first_means2d"][visible_ids], im.shape)
+        flow_img_first = flow_to_image(flow_first) # return shape is [3hw]
+        save_image(flow_img_first.float() / 255.0, save_path + "/flow_first.png")
+        # mask out all pixels that are not in the image
+        mask_first = mask_first.unsqueeze(0).repeat(3, 1, 1)
+        masked_flow_first = flow_img_first * mask_first.float()
+        save_image(masked_flow_first.float() / 255.0, save_path + "/flow_masked_first.png")
+
+        # if this_t_last_contrib in variables and variables[this_t_last_contrib] is not None:
+        #     print("we have last iteration")
+        #     save_image(variables[this_t_last_contrib].float() / variables[this_t_last_contrib].max(), save_path + "/contrib_last_i.png")
+        #     diff = (contrib - variables[this_t_last_contrib])
+        #     save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_i.png")
+        # if last_t_last_contrib in variables and variables[last_t_last_contrib] is not None:
+        #     print("we have data from last timestep")
+        #     save_image(variables[last_t_last_contrib].float() / variables[last_t_last_contrib].max(), save_path + "/contrib_last_t.png")
+        #     diff = (contrib - variables[last_t_last_contrib])
+        #     save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_t.png")
+        #     # show as binary image
+        #     save_image((diff != 0).float(), save_path + "/contrib_diff_last_t_binary.png")
+        # if t == 3:
+        #     breakpoint()
+            
     # there is no optical flow at time step 0, therefore we rely on the segmentation masks
     losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
     # if not is_initial_timestep:
@@ -335,9 +366,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     #     contrib_diff = contrib - variables['n_contrib_last']
     #     breakpoint()
 
-    if not is_initial_timestep:
-        
-
+    if not is_initial_timestep:     
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
         fg_pts = rendervar['means3D'][is_fg]
         fg_rot = rendervar['rotations'][is_fg]
@@ -371,19 +400,36 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
                     'soft_col_cons': 0.01, 'seg': 3.0}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
+    if is_initial_timestep:
+        # save the current means2d for the next timestep
+        variables["first_means2d"] = rendervar['actual_means2D'].detach()
 
     seen = radius > 0
     variables['max_2D_radius'][seen] = torch.max(radius[seen], variables['max_2D_radius'][seen])
     variables['seen'] = seen
     variables[f'n_contrib_last_{t}'] = contrib
+    variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
+    variables["means2d"] = rendervar['actual_means2D']
     # breakpoint()
     return loss, variables
 
+def compute_optical_flow_gaussians(visible_means2d: torch.Tensor, visible_means2d_prev: torch.Tensor, img_shape: torch.Tensor) -> torch.Tensor:
+    diff = visible_means2d - visible_means2d_prev
+    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]])
+    mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool)
+    for mean, movement in zip(visible_means2d, diff):
+        # check if mean is in the image
+        if mean[1] < 0 or mean[1] >= img_shape[1] or mean[0] < 0 or mean[0] >= img_shape[2]:
+            continue
+        optical_flow[0, int(mean[1]), int(mean[0])] = movement[0]
+        optical_flow[1, int(mean[1]), int(mean[0])] = movement[1]
+        mask[int(mean[1]), int(mean[0])] = True
+    return optical_flow, mask
 
 def initialize_per_timestep(params, variables, optimizer):
     pts = params['means3D']
     rot = torch.nn.functional.normalize(params['unnorm_rotations'])
-    new_pts = pts + (pts - variables["prev_pts"])
+    new_pts = pts + (pts - variables["prev_pts"]) # note(sandesh): i don't understand why they are using this difference here
     new_rot = torch.nn.functional.normalize(rot + (rot - variables["prev_rot"]))
 
     is_fg = params['seg_colors'][:, 0] > 0.5
@@ -396,6 +442,7 @@ def initialize_per_timestep(params, variables, optimizer):
     variables["prev_col"] = params['rgb_colors'].detach()
     variables["prev_pts"] = pts.detach()
     variables["prev_rot"] = rot.detach()
+    variables["prev_means2d"] = variables["means2d"].detach()
 
     new_params = {'means3D': new_pts, 'unnorm_rotations': new_rot}
     params = update_params_and_optimizer(new_params, params, optimizer)
@@ -457,7 +504,7 @@ def train(seq, exp):
         is_initial_timestep = (t == 0)
         if not is_initial_timestep:
             params, variables = initialize_per_timestep(params, variables, optimizer)
-        num_iter_per_timestep = 10000 if is_initial_timestep else 2000
+        num_iter_per_timestep = 2000 if is_initial_timestep else 2000
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             if is_initial_timestep:
@@ -481,7 +528,7 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_debug3'
+exp_name = 'exp_of_debug_initial_flow_tests'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)

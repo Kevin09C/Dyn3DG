@@ -381,7 +381,7 @@ renderCUDA(
 			if (alpha > most_alpha)
 			{
 				most_alpha = alpha;
-				most_contributor = contributor;
+				most_contributor = collected_id[j];
 			}
 
 			// Keep track of last range entry to update this
