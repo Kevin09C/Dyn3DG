@@ -117,10 +117,6 @@ RasterizeGaussiansCUDA(
 		n_contrib_out.contiguous().data<float>(),
 		radii.contiguous().data<int>());
 
-		// measure time in nanoseconds for copying the data from GPU to CPU
-		// auto start = std::chrono::high_resolution_clock::now();
-
-
 		// copy geom buffer to CPU
 		torch::Device cpu_device(torch::kCPU);
 		// create cpu version of buffer
@@ -134,80 +130,11 @@ RasterizeGaussiansCUDA(
 		char* chunkptr = geomBufferCpuFunctional(chunk_size);
 		CudaRasterizer::GeometryState geomState = CudaRasterizer::GeometryState::fromChunk(chunkptr, P);
 
-		// auto end = std::chrono::high_resolution_clock::now();
-		// std::chrono::duration<double, std::milli> elapsed = end - start;
-		// // print timing
-		// std::cout << "time for copying geom buffer from GPU to CPU: " << elapsed.count() << std::endl;
-
-		// std::cout << "geom buffer size" << geomBuffer.size(0) << std::endl;
-		// // print geom buffer shape
-		// std::cout << "geom buffer shape: " << std::endl;
-		// std::cout << geomBuffer.sizes() << std::endl;
-		// std::cout << " geom buffer cpu shape: " << geomBuffer_cpu.sizes() << std::endl;
-
-		// // print means2d from cpu geomState
-		// std::cout << "means2d from cpu geomState: " << std::endl;
-		// for (int i = 0; i < 10; i++)
-		// {
-		// 	std::cout << geomState.means2D[i].x << " " << geomState.means2D[i].y << std::endl;
-		// }
-
-		// std::cout << "means 2d shape " << means2D.sizes() << " P: " << P << std::endl;
-		// std::cout << "copying means2D from geomState to means2D" << std::endl;
-		// // geomState on GPU
-		// size_t chunk_size_gpu = CudaRasterizer::required<CudaRasterizer::GeometryState>(P);
-		// char* chunkptr_gpu = geomFunc(chunk_size_gpu);
-		// CudaRasterizer::GeometryState geomStateGpu = CudaRasterizer::GeometryState::fromChunk(chunkptr_gpu, P);
-		// copy means2D from geomState to means2D
-
-		// measure time for copy
-		// auto start_copy = std::chrono::high_resolution_clock::now();
-		// for (int i = 0; i < P; i++)
-		// {
-		// 	means2D[i][0] = geomState.means2D[i].x;
-		// 	means2D[i][1] = geomState.means2D[i].y;
-		// }
-
-		// auto end_copy = std::chrono::high_resolution_clock::now();
-		// // do the same operation with a direct memcopy
-		// auto start_copy_mem = std::chrono::high_resolution_clock::now();
-		// // copy geomState.means2d to means2D
-		// // use new tensor to copy data to with same shape as means2d
-		// torch::Tensor means2D2 = torch::empty({P, 2}, means2D.options());
 		
-		// std::cout << " pre memcpy " << std::endl;
 		cudaMemcpy(means2D.data_ptr<float>(), geomState.means2D, P * 2 * sizeof(float), cudaMemcpyHostToDevice);
-		// std::cout << " post memcpy " << std::endl;
-		// // memcpy(means2D2.data_ptr<float>(), geomState.means2D, P * 2 * sizeof(float));
 
-		// auto end_copy_mem = std::chrono::high_resolution_clock::now();
-	
-		// // assert that both tensors are equal my comparing the memory
-		// // move both tensors to cpu before comparison
-		// auto means2D_cpu = means2D.to(torch::kCPU);
-		// auto means2D2_cpu = means2D2.to(torch::kCPU);
-
-		// int ret = memcmp(means2D_cpu.data_ptr<float>(), means2D2_cpu.data_ptr<float>(), P * 2 * sizeof(float));
-
-		// std::chrono::duration<double, std::milli> elapsed_copy_mem = end_copy_mem - start_copy_mem;
-
-		// std::chrono::duration<double, std::milli> elapsed_copy = end_copy - start_copy;
-		// // print timing
-		// std::cout << "time for copying means2D from geomState to means2D: " << elapsed_copy.count() << std::endl;
-		// std::cout << "time for copying means2D from geomState to means2D with memcpy: " << elapsed_copy_mem.count() << std::endl;
-		// std::cout << "means2D and means2D2 are equal: " << ret << std::endl;
-
-
-
-		// std::cout << "copy done " << std::endl;
   }
   
-//   std::cout << geomBuffer << std::endl;
-  // print the binning buffer
-//   std::cout << "RasterizeGaussiansCUDA done" << std::endl;
-  // print n_contrib_out
-//   std::cout << "n_contrib_out: " << std::endl;
-//   std::cout << n_contrib_out << std::endl;
   return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer, out_depth, n_contrib_out);
 }
 
