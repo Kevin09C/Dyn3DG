@@ -138,9 +138,12 @@ def get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, 
         todo_prev_dataset = prev_dataset.copy()
 
     assert len(todo_curr_dataset) == len(todo_prev_dataset)
-    index = get_batch.counter #randint(0, len(todo_curr_dataset) - 1)
-    curr_data = todo_curr_dataset.pop()
-    prev_data = todo_prev_dataset.pop()
+    # index = get_batch.counter #randint(0, len(todo_curr_dataset) - 1)
+    # curr_data = todo_curr_dataset.pop()
+    # prev_data = todo_prev_dataset.pop()
+    index = randint(0, len(todo_curr_dataset) - 1)
+    curr_data = todo_curr_dataset.pop(index)
+    prev_data = todo_prev_dataset.pop(index)
     return curr_data, prev_data
 
 
@@ -167,7 +170,9 @@ def initialize_params(seq, md):
     variables = {'max_2D_radius': torch.zeros(params['means3D'].shape[0]).cuda().float(),
                  'scene_radius': scene_radius,
                  'means2D_gradient_accum': torch.zeros(params['means3D'].shape[0]).cuda().float(),
-                 'denom': torch.zeros(params['means3D'].shape[0]).cuda().float()}
+                 'denom': torch.zeros(params['means3D'].shape[0]).cuda().float(),
+                 'means2D_store': {},
+                 'first_means2d': {}}
     return params, variables
 
 
@@ -263,7 +268,21 @@ from torchvision.utils import save_image
 
 last_contrib = None
 
-def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp):
+def get_image_from_means2d(means2d, img_shape):
+    means_positions = torch.zeros([1, img_shape[1], img_shape[2]])
+    # iterate over means2D and increase pixel value at that position
+    for mean in means2d:
+        # check if mean is in the image
+        if mean[1] < 0 or mean[1] >= img_shape[1] or mean[0] < 0 or mean[0] >= img_shape[2]:
+            continue
+        means_positions[0, int(mean[1]), int(mean[0])] += 1
+    return means_positions
+
+def save_image_from_means2d(means2d, img_shape, save_path):
+    means_positions = get_image_from_means2d(means2d, img_shape)
+    save_image(means_positions.float() / means_positions.median(), save_path)
+
+def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id):
     losses = {}
     rendervar = params2rendervar(params)
     rendervar['actual_means2D'].retain_grad()
@@ -272,15 +291,18 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # if i % 100 == 0:
     #   save_image(im, f'{sandesh_path}/{t}_im_{i}_{img_number}.png')
     curr_id = curr_data['id']
+    # breakpoint()
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
     losses['im'] = 0.8 * l1_loss_v1(im, curr_data['im']) + 0.2 * (1.0 - calc_ssim(im, curr_data['im']))
-    variables['means2D'] = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
-
+    means2D = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
+    variables['means2D'] = means2D # TODO: needed for accumulation somewhere?
     segrendervar = params2rendervar(params)
     segrendervar['colors_precomp'] = params['seg_colors']
 
-    visible_ids = contrib.unique().long()
-    visible_means2d = rendervar['actual_means2D'][visible_ids]
+    # contrib: [H,W,1] id of most visible per pixel
+
+    visible_ids = contrib.unique().long() # [num_unique]
+    visible_means2d = rendervar['actual_means2D'][visible_ids] # [num_unique,2]
 
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
     if i == 1999:
@@ -296,48 +318,44 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         # save ground truth
         save_image(curr_data['im'].float() / (curr_data['im'].median() * 2), save_path + "/gt.png")
 
-        means_positions = torch.zeros_like(im)
-        # iterate over means2D and increase pixel value at that position
-        for mean in variables['means2D']:
-            # check if mean is in the image
-            if mean[1] < 0 or mean[1] >= im.shape[1] or mean[0] < 0 or mean[0] >= im.shape[2]:
-                continue
-            means_positions[0, int(mean[1]), int(mean[0])] += 1
-        save_image(means_positions.float() / means_positions.max(), save_path + "/means_positions_max.png")
-        save_image(means_positions.float() / means_positions.median(), save_path + "/means_positions_median.png")
 
-        ## save visible means 2d
-        visible_means2d = rendervar['actual_means2D'][visible_ids]
-        visible_means_positions = torch.zeros_like(im)
-        # iterate over means2D and increase pixel value at that position
-        for mean in visible_means2d:
-            # check if mean is in the image
-            if mean[1] < 0 or mean[1] >= im.shape[1] or mean[0] < 0 or mean[0] >= im.shape[2]:
-                continue
-            visible_means_positions[0, int(mean[1]), int(mean[0])] += 1
-        save_image(visible_means_positions.float() / visible_means_positions.max(), save_path + "/visible_means_positions_max.png")
-        save_image(visible_means_positions.float() / visible_means_positions.median(), save_path + "/visible_means_positions_median.png")
+        ## save means 2d as image
+        save_image_from_means2d(means2D, im.shape, save_path + "/means2d.png")
 
-        # calculate optical flow from the difference in visible means2d
-        print("saving optical flow")
-        flow, mask = compute_optical_flow_gaussians(visible_means2d, variables["prev_means2d"][visible_ids], im.shape)
+        if not is_initial_timestep:
+            # calculate optical flow from the difference in visible means2d
+            print("saving optical flow")
+            previous_visible_means2d = variables["prev_means2d_store"][camera_id][visible_ids]
+            flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
 
-        # convert to colored of image
-        flow_img = flow_to_image(flow) # return shape is [3hw]            
-        save_image(flow_img.float() / 255.0, save_path + "/flow.png")
-        # mask out all pixels that are not in the image
-        mask = mask.unsqueeze(0).repeat(3, 1, 1)
-        masked_flow = flow_img * mask.float()
-        save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
+            # convert to colored of image
+            flow_img = flow_to_image(flow) # return shape is [3hw]            
+            save_image(flow_img.float() / 255.0, save_path + "/flow.png")
+            # mask out all pixels that are not in the image
+            mask = mask.unsqueeze(0).repeat(3, 1, 1)
+            masked_flow = flow_img * mask.float()
+            save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
 
-        # also calculate optical flow from first means2d
-        flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, variables["first_means2d"][visible_ids], im.shape)
-        flow_img_first = flow_to_image(flow_first) # return shape is [3hw]
-        save_image(flow_img_first.float() / 255.0, save_path + "/flow_first.png")
-        # mask out all pixels that are not in the image
-        mask_first = mask_first.unsqueeze(0).repeat(3, 1, 1)
-        masked_flow_first = flow_img_first * mask_first.float()
-        save_image(masked_flow_first.float() / 255.0, save_path + "/flow_masked_first.png")
+            print(f"available means2d first: {variables['first_means2d'].keys()}")
+            print(f"available means2d prev: {variables['prev_means2d_store'].keys()}")
+
+            # also calculate optical flow from first means2d
+            first_visible_means2d = variables["first_means2d"][id][visible_ids]
+            flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, first_visible_means2d, im.shape)
+            flow_img_first = flow_to_image(flow_first) # return shape is [3hw]
+            save_image(flow_img_first.float() / 255.0, save_path + "/flow_first.png")
+            # mask out all pixels that are not in the image
+            mask_first = mask_first.unsqueeze(0).repeat(3, 1, 1)
+            masked_flow_first = flow_img_first * mask_first.float() 
+            save_image(masked_flow_first.float() / 255.0, save_path + "/flow_masked_first.png")
+
+            # save visible means to disk for comparison
+            save_image_from_means2d(visible_means2d, im.shape, save_path + "/visible_means2d.png")
+            save_image_from_means2d(previous_visible_means2d, im.shape, save_path + "/previous_visible_means2d.png")
+            save_image_from_means2d(first_visible_means2d, im.shape, save_path + "/first_visible_means2d.png")
+
+
+            # loss_optical_flow = loss(calculated_flow, gt_flow)
 
         # if this_t_last_contrib in variables and variables[this_t_last_contrib] is not None:
         #     print("we have last iteration")
@@ -402,20 +420,22 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
     if is_initial_timestep:
         # save the current means2d for the next timestep
-        variables["first_means2d"] = rendervar['actual_means2D'].detach()
+        variables["first_means2d"][id] = rendervar['actual_means2D'].detach()
 
     seen = radius > 0
     variables['max_2D_radius'][seen] = torch.max(radius[seen], variables['max_2D_radius'][seen])
     variables['seen'] = seen
-    variables[f'n_contrib_last_{t}'] = contrib
-    variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
-    variables["means2d"] = rendervar['actual_means2D']
+    # variables[f'n_contrib_last_{t}'] = contrib
+    # variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
+
+    variables["means2D_store"][id] = rendervar['actual_means2D'].detach()
+
     # breakpoint()
     return loss, variables
 
 def compute_optical_flow_gaussians(visible_means2d: torch.Tensor, visible_means2d_prev: torch.Tensor, img_shape: torch.Tensor) -> torch.Tensor:
-    diff = visible_means2d - visible_means2d_prev
-    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]])
+    diff = visible_means2d - visible_means2d_prev # [num_unique, 2]
+    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]]) # [H,W,2]
     mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool)
     for mean, movement in zip(visible_means2d, diff):
         # check if mean is in the image
@@ -442,7 +462,7 @@ def initialize_per_timestep(params, variables, optimizer):
     variables["prev_col"] = params['rgb_colors'].detach()
     variables["prev_pts"] = pts.detach()
     variables["prev_rot"] = rot.detach()
-    variables["prev_means2d"] = variables["means2d"].detach()
+    variables["prev_means2d_store"] = variables["means2D_store"]
 
     new_params = {'means3D': new_pts, 'unnorm_rotations': new_rot}
     params = update_params_and_optimizer(new_params, params, optimizer)
@@ -512,7 +532,8 @@ def train(seq, exp):
                 prev_data = None
             else:
                 prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
-            loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp)
+            camera_id = md['fn'][t][curr_data['id']]
+            loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id)
             loss.backward()
             if i == 1999:
               img_number += 1
@@ -528,7 +549,7 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_debug_initial_flow_tests'
+exp_name = 'exp_of_debug_initial_flow_val_random_cam'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
