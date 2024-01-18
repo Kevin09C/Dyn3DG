@@ -121,7 +121,8 @@ def get_dataset(t, md, seq):
         seg = torch.tensor(seg).float().cuda()
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
         #epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
-        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'epi': epi_col})
+        gt_flow = np.load(f"{DATASET_PREFIX}/data/{seq}/flow/{fn.replace('.jpg', '_fwd.npz')}")
+        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'epi': epi_col, 'gt_flow': gt_flow})
     return dataset
 
 
@@ -303,7 +304,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
     visible_ids = contrib.unique().long() # [num_unique]
     visible_means2d = rendervar['actual_means2D'][visible_ids] # [num_unique,2]
-
+    print(curr_data['gt_flow']['flow'].shape, visible_means2d.shape)
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
     if i == 1999:
         save_path = os.path.join(sandesh_path, exp, str(t), str(i))
