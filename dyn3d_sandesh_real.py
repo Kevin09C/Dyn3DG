@@ -9,7 +9,7 @@ Original file is located at
 
 import os
 dataset_path = "/home/cuedari/Dyn3DG"
-sandesh_path = "/home/sharma/src/Dyn3DG/data"
+sandesh_path = "/home/cuedari/Dyn3DG/data"
 # In order to access the files in this notebook we have to navigate to the correct folder
 os.chdir(dataset_path)
 # Check manually if all files are present
@@ -121,7 +121,9 @@ def get_dataset(t, md, seq):
         seg = torch.tensor(seg).float().cuda()
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
         #epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
-        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'epi': epi_col})
+        gt_flow = np.load(f"{DATASET_PREFIX}/data/{seq}/flow/{fn.replace('.jpg', '_fwd.npz')}")
+        gt_flow = torch.from_numpy(gt_flow['flow']).permute(2, 0, 1)
+        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'epi': epi_col, 'gt_flow': gt_flow})
     return dataset
 
 
@@ -305,7 +307,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
     visible_ids = contrib.unique().long() # [num_unique]
     visible_means2d = rendervar['actual_means2D'][visible_ids] # [num_unique,2]
-
+    #print(curr_data['gt_flow']['flow'].shape, visible_means2d.shape)
+    #print(calculate_epe(curr_data['gt_flow']['flow'], visible_means2d))
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
     if i == 1999:
         save_path = os.path.join(sandesh_path, exp, str(t), str(i))
@@ -329,8 +332,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             print("saving optical flow")
             previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
             flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
-
             # convert to colored of image
+            print("EPE from visible", calculate_epe(curr_data['gt_flow'], flow))
             flow_img = flow_to_image(flow) # return shape is [3hw]            
             save_image(flow_img.float() / 255.0, save_path + "/flow.png")
             # mask out all pixels that are not in the image
@@ -338,12 +341,13 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             masked_flow = flow_img * mask.float()
             save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
 
-            print(f"available means2d first: {variables['first_means2d'].keys()}")
-            print(f"available means2d prev: {variables['prev_means2d_store'].keys()}")
+            #print(f"available means2d first: {variables['first_means2d'].keys()}")
+            #print(f"available means2d prev: {variables['prev_means2d_store'].keys()}")
 
             # also calculate optical flow from first means2d
             first_visible_means2d = variables["first_means2d"][curr_id][visible_ids]
             flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, first_visible_means2d, im.shape)
+            print("EPE from first", calculate_epe(curr_data['gt_flow'], flow_first))
             flow_img_first = flow_to_image(flow_first) # return shape is [3hw]
             save_image(flow_img_first.float() / 255.0, save_path + "/flow_first.png")
             # mask out all pixels that are not in the image
