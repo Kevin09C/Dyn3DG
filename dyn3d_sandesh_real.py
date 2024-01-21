@@ -32,8 +32,8 @@ from torchvision.utils import flow_to_image
 import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-of_model = raft_small(pretrained=True, progress=False).to(device) # the
-of_model = of_model.eval()
+# of_model = raft_small(pretrained=True, progress=False).to(device) # the
+# of_model = of_model.eval()
 
 # frame_1 = torchvision.io.read_image('/content/gdrive/MyDrive/Dyn3DG/data/basketball/ims/0/000000.jpg')
 # frame_2 = torchvision.io.read_image('/content/gdrive/MyDrive/Dyn3DG/data/basketball/ims/0/000001.jpg')
@@ -129,7 +129,7 @@ def get_batch(todo_dataset, dataset):
     if "counter" not in get_batch.__dict__: get_batch.counter = 0
     if not todo_dataset:
         todo_dataset = dataset.copy()
-    curr_data = todo_dataset.pop()
+    curr_data = todo_dataset.pop(randint(0, len(todo_dataset) - 1))
     return curr_data
 
 def get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset):
@@ -287,6 +287,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     rendervar = params2rendervar(params)
     rendervar['actual_means2D'].retain_grad()
     im, radius, depth, contrib = Renderer(raster_settings=curr_data['cam'])(**rendervar)
+
     # breakpoint()
     # if i % 100 == 0:
     #   save_image(im, f'{sandesh_path}/{t}_im_{i}_{img_number}.png')
@@ -294,8 +295,9 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # breakpoint()
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
     losses['im'] = 0.8 * l1_loss_v1(im, curr_data['im']) + 0.2 * (1.0 - calc_ssim(im, curr_data['im']))
-    means2D = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
-    variables['means2D'] = means2D # TODO: needed for accumulation somewhere?
+    variables['actual_means2D'] = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
+    # variables['means2D'] = torch.zeros_like(rendervar['actual_means2D'], requires_grad=True, device="cuda") + 0
+     # TODO: needed for accumulation somewhere?
     segrendervar = params2rendervar(params)
     segrendervar['colors_precomp'] = params['seg_colors']
 
@@ -320,12 +322,12 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
 
         ## save means 2d as image
-        save_image_from_means2d(means2D, im.shape, save_path + "/means2d.png")
+        save_image_from_means2d(variables["actual_means2D"], im.shape, save_path + "/means2d.png")
 
         if not is_initial_timestep:
             # calculate optical flow from the difference in visible means2d
             print("saving optical flow")
-            previous_visible_means2d = variables["prev_means2d_store"][camera_id][visible_ids]
+            previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
             flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
 
             # convert to colored of image
@@ -340,7 +342,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             print(f"available means2d prev: {variables['prev_means2d_store'].keys()}")
 
             # also calculate optical flow from first means2d
-            first_visible_means2d = variables["first_means2d"][id][visible_ids]
+            first_visible_means2d = variables["first_means2d"][curr_id][visible_ids]
             flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, first_visible_means2d, im.shape)
             flow_img_first = flow_to_image(flow_first) # return shape is [3hw]
             save_image(flow_img_first.float() / 255.0, save_path + "/flow_first.png")
@@ -420,7 +422,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
     if is_initial_timestep:
         # save the current means2d for the next timestep
-        variables["first_means2d"][id] = rendervar['actual_means2D'].detach()
+        variables["first_means2d"][curr_id] = rendervar['actual_means2D'].clone().detach()
+        # print(f"storing first means2d, keys are {variables['first_means2d'].keys()}")
 
     seen = radius > 0
     variables['max_2D_radius'][seen] = torch.max(radius[seen], variables['max_2D_radius'][seen])
@@ -428,7 +431,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # variables[f'n_contrib_last_{t}'] = contrib
     # variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
 
-    variables["means2D_store"][id] = rendervar['actual_means2D'].detach()
+    variables["means2D_store"][curr_id] = rendervar['actual_means2D'].clone().detach()
 
     # breakpoint()
     return loss, variables
@@ -541,15 +544,17 @@ def train(seq, exp):
                 report_progress(params, curr_dataset[0], i, progress_bar)
                 if is_initial_timestep:
                     params, variables = densify(params, variables, optimizer, i)
+                # breakpoint()
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
+                
         progress_bar.close()
         output_params.append(params2cpu(params, is_initial_timestep))
         if is_initial_timestep:
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_debug_initial_flow_val_random_cam'
+exp_name = 'exp_of_debug_flow_val_random_cam_new'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)

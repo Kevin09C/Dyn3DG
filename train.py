@@ -87,6 +87,7 @@ def get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_m
 
     rendervar = params2rendervar(params)
     rendervar['means2D'].retain_grad()
+    breakpoint()
     im, radius, _, = Renderer(raster_settings=curr_data['cam'])(**rendervar)
     curr_id = curr_data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
@@ -231,7 +232,7 @@ def train(seq, exp):
 
 
 if __name__ == "__main__":
-    exp_name = "reproduce"
+    exp_name = "flow"
     for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
         train(sequence, exp_name)
         torch.cuda.empty_cache()

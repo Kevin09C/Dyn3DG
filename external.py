@@ -99,7 +99,7 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 
 def accumulate_mean2d_gradient(variables):
     variables['means2D_gradient_accum'][variables['seen']] += torch.norm(
-        variables['means2D'].grad[variables['seen'], :2], dim=-1)
+        variables['actual_means2D'].grad[variables['seen'], :2], dim=-1)
     variables['denom'][variables['seen']] += 1
     return variables
 
