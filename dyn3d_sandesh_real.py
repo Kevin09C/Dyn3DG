@@ -340,10 +340,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             mask = mask.unsqueeze(0).repeat(3, 1, 1)
             masked_flow = flow_img * mask.float()
             save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
-
-            #print(f"available means2d first: {variables['first_means2d'].keys()}")
-            #print(f"available means2d prev: {variables['prev_means2d_store'].keys()}")
-
+            
             # also calculate optical flow from first means2d
             first_visible_means2d = variables["first_means2d"][curr_id][visible_ids]
             flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, first_visible_means2d, im.shape)
@@ -359,36 +356,10 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image_from_means2d(visible_means2d, im.shape, save_path + "/visible_means2d.png")
             save_image_from_means2d(previous_visible_means2d, im.shape, save_path + "/previous_visible_means2d.png")
             save_image_from_means2d(first_visible_means2d, im.shape, save_path + "/first_visible_means2d.png")
-
-
-            # loss_optical_flow = loss(calculated_flow, gt_flow)
-
-        # if this_t_last_contrib in variables and variables[this_t_last_contrib] is not None:
-        #     print("we have last iteration")
-        #     save_image(variables[this_t_last_contrib].float() / variables[this_t_last_contrib].max(), save_path + "/contrib_last_i.png")
-        #     diff = (contrib - variables[this_t_last_contrib])
-        #     save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_i.png")
-        # if last_t_last_contrib in variables and variables[last_t_last_contrib] is not None:
-        #     print("we have data from last timestep")
-        #     save_image(variables[last_t_last_contrib].float() / variables[last_t_last_contrib].max(), save_path + "/contrib_last_t.png")
-        #     diff = (contrib - variables[last_t_last_contrib])
-        #     save_image((diff - diff.min()) / (diff.max() - diff.min()), save_path + "/contrib_diff_last_t.png")
-        #     # show as binary image
-        #     save_image((diff != 0).float(), save_path + "/contrib_diff_last_t_binary.png")
-        # if t == 3:
-        #     breakpoint()
             
     # there is no optical flow at time step 0, therefore we rely on the segmentation masks
     losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
-    # if not is_initial_timestep:
-    #   losses['optical_flow'] = compute_of_seg_loss(of_model, im, curr_data, prev_data, i, t)
 
-    #error with generated masks from MaskRCNN and Optical Flow
-    #losses['epi'] = 0.8 * l1_loss_v1(seg, curr_data['epi']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['epi']))
-    # breakpoint()
-    # if 'n_contrib_last' in variables and variables['n_contrib_last'] is not None:
-    #     contrib_diff = contrib - variables['n_contrib_last']
-    #     breakpoint()
 
     if not is_initial_timestep:     
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
