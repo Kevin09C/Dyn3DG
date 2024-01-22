@@ -9,7 +9,7 @@ Original file is located at
 
 import os
 dataset_path = "/home/cuedari/Dyn3DG"
-sandesh_path = "/home/cuedari/Dyn3DG/data"
+sandesh_path = "/home/sharma/Dyn3DG/data"
 # In order to access the files in this notebook we have to navigate to the correct folder
 os.chdir(dataset_path)
 # Check manually if all files are present
@@ -340,7 +340,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             mask = mask.unsqueeze(0).repeat(3, 1, 1)
             masked_flow = flow_img * mask.float()
             save_image(masked_flow.float() / 255.0, save_path + "/flow_masked.png")
-            
+
             # also calculate optical flow from first means2d
             first_visible_means2d = variables["first_means2d"][curr_id][visible_ids]
             flow_first, mask_first = compute_optical_flow_gaussians(visible_means2d, first_visible_means2d, im.shape)
@@ -388,11 +388,21 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
         losses['soft_col_cons'] = l1_loss_v2(params['rgb_colors'], variables["prev_col"])
 
+        # optical flow loss
+        previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
+        flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
+        # mask out all pixels that are not in the image
+        mask = mask.unsqueeze(0).repeat(2, 1, 1)
+        flow_loss = calculate_epe(curr_data['gt_flow'] * mask.float(), flow * mask.float())
+            # convert to colored of image
+        # print("EPE from visible", flow_loss)
+        losses['optical_flow'] = flow_loss
+
         # compute EPE at optical flow level
         #losses['optical_flow']  = compute_optical_flow_loss(of_model, im, curr_data, prev_data)
 
     loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-                    'soft_col_cons': 0.01, 'seg': 3.0}
+                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
     if is_initial_timestep:
@@ -529,7 +539,7 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_debug_flow_val_random_cam_new'
+exp_name = 'exp_of_1'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
