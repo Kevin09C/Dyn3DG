@@ -30,6 +30,7 @@ import torchvision.transforms as T
 from torchvision.models.optical_flow import raft_large, raft_small
 from torchvision.utils import flow_to_image
 import numpy as np
+import oflibpytorch as of
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # of_model = raft_small(pretrained=True, progress=False).to(device) # the
@@ -102,28 +103,21 @@ DATASET_PREFIX = dataset_path
 
 def get_dataset(t, md, seq):
     dataset = []
-    for c in range(10):
+    for c in range(1):
     #for c in range(len(md['fn'][t])):
         w, h, k, w2c = md['w'], md['h'], md['k'][t][c], md['w2c'][t][c]
         cam = setup_camera(w, h, k, w2c, near=1.0, far=100)
         fn = md['fn'][t][c]
-        if c <= 10:
-#          epi = np.array(copy.deepcopy(Image.open(f"{DATASET_PREFIX}/data/{seq}/epipolar_error_png/{fn.replace('.jpg', '.png')}"))) #masks from RAFT+MASKRCNN
- #         epi = torch.tensor(epi).float().cuda()             #convert to tensor
- #         epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
-           epi_col = None
-        else:
-           epi_col = None
         im = np.array(copy.deepcopy(Image.open(f"{DATASET_PREFIX}/data/{seq}/ims/{fn}")))
         im = torch.tensor(im).float().cuda().permute(2, 0, 1) / 255
-        #epi = torch.tensor(epi).float().cuda()             #convert to tensor
+
         seg = np.array(copy.deepcopy(Image.open(f"{DATASET_PREFIX}/data/{seq}/seg/{fn.replace('.jpg', '.png')}"))).astype(np.float32)
         seg = torch.tensor(seg).float().cuda()
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
         #epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
         gt_flow = np.load(f"{DATASET_PREFIX}/data/{seq}/flow/{fn.replace('.jpg', '_fwd.npz')}")
         gt_flow = torch.from_numpy(gt_flow['flow']).permute(2, 0, 1)
-        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'epi': epi_col, 'gt_flow': gt_flow})
+        dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'gt_flow': gt_flow})
     return dataset
 
 
@@ -310,7 +304,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     #print(curr_data['gt_flow']['flow'].shape, visible_means2d.shape)
     #print(calculate_epe(curr_data['gt_flow']['flow'], visible_means2d))
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
-    if i == 1999:
+    save_iter = 99 if not is_initial_timestep else 1999
+    if i == save_iter:
         save_path = os.path.join(sandesh_path, exp, str(t), str(i))
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
@@ -352,6 +347,19 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             masked_flow_first = flow_img_first * mask_first.float() 
             save_image(masked_flow_first.float() / 255.0, save_path + "/flow_masked_first.png")
 
+            # save flow ground truth
+            # flow_image = flow_to_image(curr_data['gt_flow'])
+            # save_image(flow_image.float() / 255.0, save_path + "/gt_flow.png")
+
+            flow_object = of.Flow(flow)
+            flow_arrow_image = flow_object.visualise_arrows(5)
+            save_image(flow_arrow_image.float() / 255.0, save_path + "/flow_arrow.png")
+
+            # save arrow image for ground truth
+            flow_object_gt = of.Flow(curr_data['gt_flow'])
+            flow_arrow_image_gt = flow_object_gt.visualise_arrows(5)
+            save_image(flow_arrow_image_gt.float() / 255.0, save_path + "/flow_arrow_gt.png")
+
             # save visible means to disk for comparison
             save_image_from_means2d(visible_means2d, im.shape, save_path + "/visible_means2d.png")
             save_image_from_means2d(previous_visible_means2d, im.shape, save_path + "/previous_visible_means2d.png")
@@ -362,9 +370,10 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
 
     if not is_initial_timestep:     
-        is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
+        is_fg = (params['seg_colors'][:, 0] > 0.5).detach() # shape torch.Size([190428]) # [num_points]
         fg_pts = rendervar['means3D'][is_fg]
         fg_rot = rendervar['rotations'][is_fg]
+        # breakpoint()
 
         rel_rot = quat_mult(fg_rot, variables["prev_inv_rot_fg"])
         rot = build_rotation(rel_rot)
@@ -394,15 +403,52 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         # mask out all pixels that are not in the image
         mask = mask.unsqueeze(0).repeat(2, 1, 1)
         flow_loss = calculate_epe(curr_data['gt_flow'] * mask.float(), flow * mask.float())
-            # convert to colored of image
-        # print("EPE from visible", flow_loss)
+        # print("EPE ", flow_loss)
         losses['optical_flow'] = flow_loss
+        print(f"EPE from previous {flow_loss}, image loss {losses['im']}")
+        # print("id is", curr_id)
+        # save images of outliers
+        if True: #flow_loss > 0.5
+            save_path = os.path.join(sandesh_path, exp, str(t), str(i))
+            if not os.path.exists(save_path):
+                os.makedirs(save_path, exist_ok=True)
+            # save_image(seg.float() / 255.0, save_path + "/seg.png")
+            print("saving image to " + save_path)
+            # save raw image
+            save_image(im.float() / (im.median() * 2), save_path + "/im.png")
+            # save ground truth
+            save_image(curr_data['im'].float() / (curr_data['im'].median() * 2), save_path + "/gt.png")
+            # save optical flow
+            flow_object = of.Flow(flow)
+            flow_arrow_image = flow_object.visualise_arrows(5)
+            save_image(flow_arrow_image.float() / 255.0, save_path + "/flow_arrow.png")
+            # save arrow image for ground truth
+            flow_object_gt = of.Flow(curr_data['gt_flow'])
+            flow_arrow_image_gt = flow_object_gt.visualise_arrows(5)
+            save_image(flow_arrow_image_gt.float() / 255.0, save_path + "/flow_arrow_gt.png")
+
+            # overlay ground truth and image 
+            # breakpoint()
+            overlay_image = flow_arrow_image_gt.clone().cuda()
+            image = curr_data['im'].float() / (curr_data['im'].median() * 2)
+            # overlay_image[0, 0, :, :][flow_arrow_image_gt[0, :, :, :] == 255] = image[:, :, :][flow_arrow_image_gt[0,:, :, :] == 255]
+            overlay_image[flow_arrow_image_gt == 255] = (image[flow_arrow_image_gt[0] == 255] * 255.0).byte()
+            # overlay_image[0, 1, :, :][flow_arrow_image_gt[0, 1, :, :] == 255] = image[1, :, :][flow_arrow_image_gt[1, :, :] == 255]
+            # overlay_image[0, 2, :, :][flow_arrow_image_gt[0, 2, :, :] == 255] = image[2, :, :][flow_arrow_image_gt[2, :, :] == 255]
+
+            save_image(overlay_image.float() / 255.0, save_path + "/overlay_gt.png")
+
+            # overlay estimated and image
+            overlay_image = flow_arrow_image.clone().cuda()
+            overlay_image[flow_arrow_image == 255] = (image[flow_arrow_image[0] == 255] * 255.0).byte()
+            save_image(overlay_image.float() / 255.0, save_path + "/overlay_estimated.png")
+            # breakpoint()
 
         # compute EPE at optical flow level
         #losses['optical_flow']  = compute_optical_flow_loss(of_model, im, curr_data, prev_data)
 
     loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
+                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 4.0}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
     if is_initial_timestep:
@@ -423,7 +469,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
 def compute_optical_flow_gaussians(visible_means2d: torch.Tensor, visible_means2d_prev: torch.Tensor, img_shape: torch.Tensor) -> torch.Tensor:
     diff = visible_means2d - visible_means2d_prev # [num_unique, 2]
-    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]]) # [H,W,2]
+    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]]) # [2,H,W]
     mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool)
     for mean, movement in zip(visible_means2d, diff):
         # check if mean is in the image
@@ -512,14 +558,14 @@ def train(seq, exp):
         is_initial_timestep = (t == 0)
         if not is_initial_timestep:
             params, variables = initialize_per_timestep(params, variables, optimizer)
-        num_iter_per_timestep = 2000 if is_initial_timestep else 2000
+        num_iter_per_timestep = 2000 if is_initial_timestep else 100
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
-            if is_initial_timestep:
-                curr_data = get_batch(todo_curr_dataset, curr_dataset)
-                prev_data = None
-            else:
-                prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
+            # if is_initial_timestep:
+            curr_data = get_batch(todo_curr_dataset, curr_dataset)
+            prev_data = None
+            # else:
+            #     prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
             camera_id = md['fn'][t][curr_data['id']]
             loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id)
             loss.backward()
@@ -539,7 +585,7 @@ def train(seq, exp):
             variables = initialize_post_first_timestep(params, variables, optimizer)
     save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_1'
+exp_name = 'exp_of_overfit_with_flow_overlay'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
