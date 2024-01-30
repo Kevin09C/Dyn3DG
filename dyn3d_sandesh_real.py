@@ -90,7 +90,7 @@ import json
 import copy
 import numpy as np
 from PIL import Image
-from random import randint
+from random import randint, seed, sample
 from tqdm import tqdm
 from diff_gaussian_rasterization import GaussianRasterizer as Renderer
 from helpers import setup_camera, l1_loss_v1, l1_loss_v2, weighted_l2_loss_v1, weighted_l2_loss_v2, quat_mult, \
@@ -99,11 +99,12 @@ from external import calc_ssim, calc_psnr, build_rotation, densify, update_param
 from torchvision.utils import save_image
 
 
+
 DATASET_PREFIX = dataset_path
 
-def get_dataset(t, md, seq):
+def get_dataset(t, md, seq, cameras):
     dataset = []
-    for c in range(1):
+    for c in cameras:
     #for c in range(len(md['fn'][t])):
         w, h, k, w2c = md['w'], md['h'], md['k'][t][c], md['w2c'][t][c]
         cam = setup_camera(w, h, k, w2c, near=1.0, far=100)
@@ -116,7 +117,7 @@ def get_dataset(t, md, seq):
         seg_col = torch.stack((seg, torch.zeros_like(seg), 1 - seg))
         #epi_col = torch.stack((epi, torch.zeros_like(epi), 1 - epi)) #epi
         gt_flow = np.load(f"{DATASET_PREFIX}/data/{seq}/flow/{fn.replace('.jpg', '_fwd.npz')}")
-        gt_flow = torch.from_numpy(gt_flow['flow']).permute(2, 0, 1)
+        gt_flow = torch.from_numpy(gt_flow['flow']).permute(2, 0, 1).cuda()
         dataset.append({'cam': cam, 'im': im, 'seg': seg_col, 'id': c, 'gt_flow': gt_flow})
     return dataset
 
@@ -304,7 +305,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     #print(curr_data['gt_flow']['flow'].shape, visible_means2d.shape)
     #print(calculate_epe(curr_data['gt_flow']['flow'], visible_means2d))
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
-    save_iter = 99 if not is_initial_timestep else 1999
+    save_iter = 499 if not is_initial_timestep else 1999
     if i == save_iter:
         save_path = os.path.join(sandesh_path, exp, str(t), str(i))
         if not os.path.exists(save_path):
@@ -399,16 +400,24 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
         # optical flow loss
         previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
+        # previous_means2d = variables["prev_means2d_store"][curr_id].to("cuda")
+        # means2d = rendervar['actual_means2D'].to("cuda")
         flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
+        # flow, mask = compute_optical_flow_gaussians(means2d, previous_means2d, im.shape)
+
         # mask out all pixels that are not in the image
-        mask = mask.unsqueeze(0).repeat(2, 1, 1)
-        flow_loss = calculate_epe(curr_data['gt_flow'] * mask.float(), flow * mask.float())
+        # mask = mask.unsqueeze(0).repeat(2, 1, 1)
+        mask = curr_data["seg"][0] # lets use the foreground background segmentation as mask
+        # breakpoint()
+        flow = flow * mask
+        gt_flow = curr_data['gt_flow'].cuda() * mask
+        flow_loss = calculate_epe(gt_flow, flow)
         # print("EPE ", flow_loss)
         losses['optical_flow'] = flow_loss
-        print(f"EPE from previous {flow_loss}, image loss {losses['im']}")
+        # print(f"EPE from previous {flow_loss}, image loss {losses['im']}")
         # print("id is", curr_id)
         # save images of outliers
-        if True: #flow_loss > 0.5
+        if i % 10 == 0: #flow_loss > 0.5
             save_path = os.path.join(sandesh_path, exp, str(t), str(i))
             if not os.path.exists(save_path):
                 os.makedirs(save_path, exist_ok=True)
@@ -420,11 +429,11 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image(curr_data['im'].float() / (curr_data['im'].median() * 2), save_path + "/gt.png")
             # save optical flow
             flow_object = of.Flow(flow)
-            flow_arrow_image = flow_object.visualise_arrows(5)
+            flow_arrow_image = flow_object.visualise_arrows(1)
             save_image(flow_arrow_image.float() / 255.0, save_path + "/flow_arrow.png")
             # save arrow image for ground truth
             flow_object_gt = of.Flow(curr_data['gt_flow'])
-            flow_arrow_image_gt = flow_object_gt.visualise_arrows(5)
+            flow_arrow_image_gt = flow_object_gt.visualise_arrows(1)
             save_image(flow_arrow_image_gt.float() / 255.0, save_path + "/flow_arrow_gt.png")
 
             # overlay ground truth and image 
@@ -447,8 +456,10 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         # compute EPE at optical flow level
         #losses['optical_flow']  = compute_optical_flow_loss(of_model, im, curr_data, prev_data)
 
-    loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 4.0}
+    # loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
+    #                 'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 4.0}
+    loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
+                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
     if is_initial_timestep:
@@ -469,14 +480,14 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
 def compute_optical_flow_gaussians(visible_means2d: torch.Tensor, visible_means2d_prev: torch.Tensor, img_shape: torch.Tensor) -> torch.Tensor:
     diff = visible_means2d - visible_means2d_prev # [num_unique, 2]
-    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]]) # [2,H,W]
-    mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool)
+    optical_flow = torch.zeros([2, img_shape[1], img_shape[2]], device=visible_means2d.device) # [2,H,W]
+    mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool, device=visible_means2d.device)
     for mean, movement in zip(visible_means2d, diff):
         # check if mean is in the image
         if mean[1] < 0 or mean[1] >= img_shape[1] or mean[0] < 0 or mean[0] >= img_shape[2]:
             continue
-        optical_flow[0, int(mean[1]), int(mean[0])] = movement[0]
-        optical_flow[1, int(mean[1]), int(mean[0])] = movement[1]
+        optical_flow[0, int(mean[1]), int(mean[0])] += movement[0]
+        optical_flow[1, int(mean[1]), int(mean[0])] += movement[1]
         mask[int(mean[1]), int(mean[0])] = True
     return optical_flow, mask
 
@@ -550,15 +561,23 @@ def train(seq, exp):
     prev_data = None  #testing OF idea
     print("Initating Training")
     img_number = 0 #NOTE: TO DELETE
+
+    ## define camera subset to use
+    # lets have reproducible results
+    seed(42)
+    num_cams = 10
+    cameras = sample(range(len(md['fn'][0])), num_cams)
+    print("using cameras ", cameras)
+
     for t in range(num_timesteps):
-        curr_dataset = get_dataset(t, md, seq)
+        curr_dataset = get_dataset(t, md, seq, cameras)
         todo_curr_dataset = []
-        todo_prev_dataset = []
-        prev_dataset = None if t == 0 else get_dataset(t - 1, md, seq)
+        # todo_prev_dataset = []
+        # prev_dataset = None if t == 0 else get_dataset(t - 1, md, seq)
         is_initial_timestep = (t == 0)
         if not is_initial_timestep:
             params, variables = initialize_per_timestep(params, variables, optimizer)
-        num_iter_per_timestep = 2000 if is_initial_timestep else 100
+        num_iter_per_timestep = 2000 if is_initial_timestep else 500
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             # if is_initial_timestep:
@@ -583,9 +602,10 @@ def train(seq, exp):
         output_params.append(params2cpu(params, is_initial_timestep))
         if is_initial_timestep:
             variables = initialize_post_first_timestep(params, variables, optimizer)
-    save_params(output_params, seq, exp)
+        # save params every iteration
+        save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_overfit_with_flow_overlay'
+exp_name = 'exp_of_10_cams_masked_disable_other_regularizer'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)

@@ -98,7 +98,7 @@ def save_params(output_params, seq, exp):
 
     to_save = {}
     for k in output_params[0].keys():
-        if k in output_params[1].keys():
+        if len(output_params) > 1 and k in output_params[1].keys():
             to_save[k] = np.stack([params[k] for params in output_params])
         else:
             to_save[k] = output_params[0][k]
