@@ -97,7 +97,9 @@ from helpers import setup_camera, l1_loss_v1, l1_loss_v2, weighted_l2_loss_v1, w
     o3d_knn, params2rendervar, params2cpu, save_params
 from external import calc_ssim, calc_psnr, build_rotation, densify, update_params_and_optimizer
 from torchvision.utils import save_image
+import faulthandler
 
+faulthandler.enable()
 
 
 DATASET_PREFIX = dataset_path
@@ -323,7 +325,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         ## save means 2d as image
         save_image_from_means2d(variables["actual_means2D"], im.shape, save_path + "/means2d.png")
 
-        if not is_initial_timestep:
+        if  False: # not is_initial_timestep:
             # calculate optical flow from the difference in visible means2d
             print("saving optical flow")
             previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
@@ -400,19 +402,19 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
         # optical flow loss
         previous_visible_means2d = variables["prev_means2d_store"][curr_id][visible_ids]
-        # previous_means2d = variables["prev_means2d_store"][curr_id].to("cuda")
-        # means2d = rendervar['actual_means2D'].to("cuda")
+        # # previous_means2d = variables["prev_means2d_store"][curr_id].to("cuda")
+        # # means2d = rendervar['actual_means2D'].to("cuda")
         flow, mask = compute_optical_flow_gaussians(visible_means2d, previous_visible_means2d, im.shape)
-        # flow, mask = compute_optical_flow_gaussians(means2d, previous_means2d, im.shape)
+        # # flow, mask = compute_optical_flow_gaussians(means2d, previous_means2d, im.shape)
 
-        # mask out all pixels that are not in the image
+        # # mask out all pixels that are not in the image
         mask = curr_data["seg"][0] # lets use the foreground background segmentation as mask
         flow = flow * mask
-        gt_flow = curr_data['gt_flow'].cuda() * mask
+        gt_flow = curr_data['gt_flow'] * mask
         flow_loss = calculate_epe(gt_flow, flow)
-        losses['optical_flow'] = flow_loss
+        losses['optical_flow'] = 0.0#flow_loss
         # save images of outliers
-        if i % 10 == 0: #flow_loss > 0.5
+        if False: #i % 10 == 0: #flow_loss > 0.5
             save_path = os.path.join(sandesh_path, exp, str(t), str(i))
             if not os.path.exists(save_path):
                 os.makedirs(save_path, exist_ok=True)
@@ -443,10 +445,10 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image(overlay_image.float() / 255.0, save_path + "/overlay_estimated.png")
 
        
-    # loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-    #                 'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 4.0}
-    loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
-                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
+    loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
+                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
+    # loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
+    #                 'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
     if is_initial_timestep:
@@ -556,7 +558,7 @@ def train(seq, exp):
     cameras = sample(range(len(md['fn'][0])), num_cams)
     print("using cameras ", cameras)
 
-    for t in range(num_timesteps):
+    for t in range(7):#range(num_timesteps):
         curr_dataset = get_dataset(t, md, seq, cameras)
         todo_curr_dataset = []
         # todo_prev_dataset = []
@@ -592,9 +594,11 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_10_cams_base'
+exp_name = 'exp_of_10_cams_base_w_reg_and_of'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
+    torch.cuda.empty_cache()
+    
     train(sequence, exp_name)
     torch.cuda.empty_cache()
     #/content/gdrive/MyDrive/Dyn3DG/data/basketball/epipolar_error_png/1/00000.png
