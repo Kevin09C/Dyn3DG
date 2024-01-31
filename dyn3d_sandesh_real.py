@@ -146,7 +146,7 @@ def get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, 
     return curr_data, prev_data
 
 
-def initialize_params(seq, md):
+def initialize_params(seq, md, cameras):
     init_pt_cld = np.load(f"{DATASET_PREFIX}/data/{seq}/init_pt_cld.npz")["data"]
     seg = init_pt_cld[:, 6]
     max_cams = 50
@@ -164,6 +164,7 @@ def initialize_params(seq, md):
     }
     params = {k: torch.nn.Parameter(torch.tensor(v).cuda().float().contiguous().requires_grad_(True)) for k, v in
               params.items()}
+    params['actual_means2D'] = {c: torch.nn.Parameter(torch.zeros((params['means3D'].shape[0], 2)).cuda().float().contiguous().requires_grad_(True)) for c in cameras}
     cam_centers = np.linalg.inv(md['w2c'][0])[:, :3, 3]  # Get scene radius
     scene_radius = 1.1 * np.max(np.linalg.norm(cam_centers - np.mean(cam_centers, 0)[None], axis=-1))
     variables = {'max_2D_radius': torch.zeros(params['means3D'].shape[0]).cuda().float(),
@@ -185,9 +186,14 @@ def initialize_optimizer(params, variables):
         'log_scales': 0.001,
         'cam_m': 1e-4,
         'cam_c': 1e-4,
+        'actual_means2D': 1e-4,
     }
-    param_groups = [{'params': [v], 'name': k, 'lr': lrs[k]} for k, v in params.items()]
-    return torch.optim.Adam(param_groups, lr=0.0, eps=1e-15)
+    # just use one random camera
+    param_groups = [{'params': [(list(v.items())[0][1] if k == "actual_means2D" else v)], 'name': k, 'lr': lrs[k]} for k, v in params.items()]
+    
+    # return torch.optim.Adam(param_groups, lr=0.0, eps=1e-15)
+    # SGD does not use the second moment
+    return torch.optim.SGD(param_groups, lr=0.01)
 
 def _normalize_flow(flow):
   return (flow - flow.min()) / (flow.max() - flow.min())
@@ -283,21 +289,22 @@ def save_image_from_means2d(means2d, img_shape, save_path):
 
 def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id):
     losses = {}
-    rendervar = params2rendervar(params)
+    curr_id = curr_data['id']
+
+    rendervar = params2rendervar(params, curr_id)
     rendervar['actual_means2D'].retain_grad()
     im, radius, depth, contrib = Renderer(raster_settings=curr_data['cam'])(**rendervar)
 
     # breakpoint()
     # if i % 100 == 0:
     #   save_image(im, f'{sandesh_path}/{t}_im_{i}_{img_number}.png')
-    curr_id = curr_data['id']
     # breakpoint()
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
     losses['im'] = 0.8 * l1_loss_v1(im, curr_data['im']) + 0.2 * (1.0 - calc_ssim(im, curr_data['im']))
     variables['actual_means2D'] = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
     # variables['means2D'] = torch.zeros_like(rendervar['actual_means2D'], requires_grad=True, device="cuda") + 0
      # TODO: needed for accumulation somewhere?
-    segrendervar = params2rendervar(params)
+    segrendervar = params2rendervar(params, curr_id)
     segrendervar['colors_precomp'] = params['seg_colors']
 
     # contrib: [H,W,1] id of most visible per pixel
@@ -412,9 +419,10 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         flow = flow * mask
         gt_flow = curr_data['gt_flow'] * mask
         flow_loss = calculate_epe(gt_flow, flow)
-        losses['optical_flow'] = 0.0#flow_loss
+        breakpoint()
+        losses['optical_flow'] = flow_loss
         # save images of outliers
-        if False: #i % 10 == 0: #flow_loss > 0.5
+        if i % 10 == 0: #flow_loss > 0.5
             save_path = os.path.join(sandesh_path, exp, str(t), str(i))
             if not os.path.exists(save_path):
                 os.makedirs(save_path, exist_ok=True)
@@ -445,15 +453,19 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image(overlay_image.float() / 255.0, save_path + "/overlay_estimated.png")
 
        
-    loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
-                    'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
-    # loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
-    #                 'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
+    # loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
+    #                 'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
+        loss_weights = {'im': 0.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
+                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
+    else:
+        loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
+                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.000}    
+    
     loss = sum([loss_weights[k] * v for k, v in losses.items()])
 
-    if is_initial_timestep:
+    # if is_initial_timestep:
         # save the current means2d for the next timestep
-        variables["first_means2d"][curr_id] = rendervar['actual_means2D'].clone().detach()
+        # variables["first_means2d"][curr_id] = rendervar['actual_means2D'].detach()
         # print(f"storing first means2d, keys are {variables['first_means2d'].keys()}")
 
     seen = radius > 0
@@ -462,7 +474,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # variables[f'n_contrib_last_{t}'] = contrib
     # variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
 
-    variables["means2D_store"][curr_id] = rendervar['actual_means2D'].clone().detach()
+    variables["means2D_store"][curr_id] = rendervar['actual_means2D']
+    params['actual_means2D'][curr_id] = rendervar['actual_means2D']
 
     # breakpoint()
     return loss, variables
@@ -484,6 +497,13 @@ def initialize_per_timestep(params, variables, optimizer):
     pts = params['means3D']
     rot = torch.nn.functional.normalize(params['unnorm_rotations'])
     new_pts = pts + (pts - variables["prev_pts"]) # note(sandesh): i don't understand why they are using this difference here
+    # try adding the same for means2d
+    new_means2d = {}
+    detached_means2d = {}
+    for camera_id, means2d in params['actual_means2D'].items() :
+        new_means2d[camera_id] = means2d + (means2d - variables["prev_means2d_store"][camera_id])
+        detached_means2d[camera_id] = means2d.detach()
+
     new_rot = torch.nn.functional.normalize(rot + (rot - variables["prev_rot"]))
 
     is_fg = params['seg_colors'][:, 0] > 0.5
@@ -496,9 +516,9 @@ def initialize_per_timestep(params, variables, optimizer):
     variables["prev_col"] = params['rgb_colors'].detach()
     variables["prev_pts"] = pts.detach()
     variables["prev_rot"] = rot.detach()
-    variables["prev_means2d_store"] = variables["means2D_store"]
+    variables["prev_means2d_store"] = detached_means2d
 
-    new_params = {'means3D': new_pts, 'unnorm_rotations': new_rot}
+    new_params = {'means3D': new_pts, 'unnorm_rotations': new_rot, 'actual_means2D': new_means2d}
     params = update_params_and_optimizer(new_params, params, optimizer)
 
     return params, variables
@@ -520,6 +540,10 @@ def initialize_post_first_timestep(params, variables, optimizer, num_knn=20):
     variables["init_bg_rot"] = init_bg_rot.detach()
     variables["prev_pts"] = params['means3D'].detach()
     variables["prev_rot"] = torch.nn.functional.normalize(params['unnorm_rotations']).detach()
+    detached_means2d = {}
+    for k,v in params["actual_means2D"].items():
+        detached_means2d[k] = v.detach()
+    variables["prev_means2d_store"] = detached_means2d
     params_to_fix = ['logit_opacities', 'log_scales', 'cam_m', 'cam_c']
     for param_group in optimizer.param_groups:
         if param_group["name"] in params_to_fix:
@@ -527,9 +551,9 @@ def initialize_post_first_timestep(params, variables, optimizer, num_knn=20):
     return variables
 
 
-def report_progress(params, data, i, progress_bar, every_i=100):
+def report_progress(params, data, i, progress_bar, camera_id, every_i=100):
     if i % every_i == 0:
-        im, _, _, _ = Renderer(raster_settings=data['cam'])(**params2rendervar(params))
+        im, _, _, _ = Renderer(raster_settings=data['cam'])(**params2rendervar(params, camera_id=camera_id))
         curr_id = data['id']
         im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
         psnr = calc_psnr(im, data['im']).mean()
@@ -544,19 +568,20 @@ def train(seq, exp):
     print("Preparing training variables")
     md = json.load(open(f"{DATASET_PREFIX}/data/{seq}/train_meta.json", 'r'))  # metadata
     num_timesteps = len(md['fn'])
-    params, variables = initialize_params(seq, md)
+     ## define camera subset to use
+    # lets have reproducible results
+    seed(42)
+    num_cams = 1
+    cameras = sample(range(len(md['fn'][0])), num_cams)
+    print("using cameras ", cameras)
+    params, variables = initialize_params(seq, md, cameras)
     optimizer = initialize_optimizer(params, variables)
     output_params = []
     prev_data = None  #testing OF idea
     print("Initating Training")
     img_number = 0 #NOTE: TO DELETE
 
-    ## define camera subset to use
-    # lets have reproducible results
-    seed(42)
-    num_cams = 10
-    cameras = sample(range(len(md['fn'][0])), num_cams)
-    print("using cameras ", cameras)
+
 
     for t in range(7):#range(num_timesteps):
         curr_dataset = get_dataset(t, md, seq, cameras)
@@ -566,7 +591,7 @@ def train(seq, exp):
         is_initial_timestep = (t == 0)
         if not is_initial_timestep:
             params, variables = initialize_per_timestep(params, variables, optimizer)
-        num_iter_per_timestep = 2000 if is_initial_timestep else 500
+        num_iter_per_timestep = 10 if is_initial_timestep else 10
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             # if is_initial_timestep:
@@ -574,13 +599,13 @@ def train(seq, exp):
             prev_data = None
             # else:
             #     prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
-            camera_id = md['fn'][t][curr_data['id']]
+            camera_id = curr_data['id']
             loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id)
             loss.backward()
             if i == 1999:
               img_number += 1
             with torch.no_grad():
-                report_progress(params, curr_dataset[0], i, progress_bar)
+                report_progress(params, curr_dataset[0], i, progress_bar, camera_id)
                 if is_initial_timestep:
                     params, variables = densify(params, variables, optimizer, i)
                 # breakpoint()
@@ -594,7 +619,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_10_cams_base_w_reg_and_of'
+exp_name = 'exp_of_1_cam_only_of'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     torch.cuda.empty_cache()

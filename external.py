@@ -106,6 +106,8 @@ def accumulate_mean2d_gradient(variables):
 
 def update_params_and_optimizer(new_params, params, optimizer):
     for k, v in new_params.items():
+        if k == "actual_means2D":
+            continue
         group = [x for x in optimizer.param_groups if x["name"] == k][0]
         stored_state = optimizer.state.get(group['params'][0], None)
 

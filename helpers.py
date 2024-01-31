@@ -31,7 +31,12 @@ def setup_camera(w, h, k, w2c, near=0.01, far=100):
     return cam
 
 
-def params2rendervar(params):
+def params2rendervar(params, camera_id):
+    if camera_id in params["actual_means2D"]:
+        means2d = params['actual_means2D'][camera_id]
+    else:
+        raise "camera not in params, something went wrong"
+        means2d = torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0,
     rendervar = {
         'means3D': params['means3D'],
         'colors_precomp': params['rgb_colors'],
@@ -39,7 +44,8 @@ def params2rendervar(params):
         'opacities': torch.sigmoid(params['logit_opacities']),
         'scales': torch.exp(params['log_scales']),
         # 'means2D': torch.zeros_like(params['means3D'], requires_grad=True, device="cuda") + 0,
-        'actual_means2D': torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0,
+        # 'actual_means2D': torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0,
+        'actual_means2D': means2d
     }
     return rendervar
 
@@ -85,7 +91,8 @@ def o3d_knn(pts, num_knn):
 
 def params2cpu(params, is_initial_timestep):
     if is_initial_timestep:
-        res = {k: v.detach().cpu().contiguous().numpy() for k, v in params.items()}
+        res = {k: v.detach().cpu().contiguous().numpy() for k, v in params.items()
+               if k != "actual_means2D"}
     else:
         res = {k: v.detach().cpu().contiguous().numpy() for k, v in params.items() if
                k in ['means3D', 'rgb_colors', 'unnorm_rotations']}
@@ -94,7 +101,10 @@ def params2cpu(params, is_initial_timestep):
 
 def save_params(output_params, seq, exp):
     base_dir = "/home/sharma/src"
-    os.makedirs(f"{base_dir}/output/{exp}/{seq}", exist_ok=True)
+    timestep = len(output_params)
+    path = f"{base_dir}/output/{exp}/{seq}/{timestep}"
+    os.makedirs(path, exist_ok=True)
+    print(f"saving params for t={timestep} at {path}")
 
     to_save = {}
     for k in output_params[0].keys():
@@ -103,4 +113,4 @@ def save_params(output_params, seq, exp):
         else:
             to_save[k] = output_params[0][k]
    
-    np.savez(f"{base_dir}/output/{exp}/{seq}/params", **to_save)
+    np.savez(f"{path}/params", **to_save)
