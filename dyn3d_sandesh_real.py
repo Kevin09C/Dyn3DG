@@ -406,22 +406,16 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         # flow, mask = compute_optical_flow_gaussians(means2d, previous_means2d, im.shape)
 
         # mask out all pixels that are not in the image
-        # mask = mask.unsqueeze(0).repeat(2, 1, 1)
         mask = curr_data["seg"][0] # lets use the foreground background segmentation as mask
-        # breakpoint()
         flow = flow * mask
         gt_flow = curr_data['gt_flow'].cuda() * mask
         flow_loss = calculate_epe(gt_flow, flow)
-        # print("EPE ", flow_loss)
         losses['optical_flow'] = flow_loss
-        # print(f"EPE from previous {flow_loss}, image loss {losses['im']}")
-        # print("id is", curr_id)
         # save images of outliers
         if i % 10 == 0: #flow_loss > 0.5
             save_path = os.path.join(sandesh_path, exp, str(t), str(i))
             if not os.path.exists(save_path):
                 os.makedirs(save_path, exist_ok=True)
-            # save_image(seg.float() / 255.0, save_path + "/seg.png")
             print("saving image to " + save_path)
             # save raw image
             save_image(im.float() / (im.median() * 2), save_path + "/im.png")
@@ -437,13 +431,9 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image(flow_arrow_image_gt.float() / 255.0, save_path + "/flow_arrow_gt.png")
 
             # overlay ground truth and image 
-            # breakpoint()
             overlay_image = flow_arrow_image_gt.clone().cuda()
             image = curr_data['im'].float() / (curr_data['im'].median() * 2)
-            # overlay_image[0, 0, :, :][flow_arrow_image_gt[0, :, :, :] == 255] = image[:, :, :][flow_arrow_image_gt[0,:, :, :] == 255]
             overlay_image[flow_arrow_image_gt == 255] = (image[flow_arrow_image_gt[0] == 255] * 255.0).byte()
-            # overlay_image[0, 1, :, :][flow_arrow_image_gt[0, 1, :, :] == 255] = image[1, :, :][flow_arrow_image_gt[1, :, :] == 255]
-            # overlay_image[0, 2, :, :][flow_arrow_image_gt[0, 2, :, :] == 255] = image[2, :, :][flow_arrow_image_gt[2, :, :] == 255]
 
             save_image(overlay_image.float() / 255.0, save_path + "/overlay_gt.png")
 
@@ -451,11 +441,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             overlay_image = flow_arrow_image.clone().cuda()
             overlay_image[flow_arrow_image == 255] = (image[flow_arrow_image[0] == 255] * 255.0).byte()
             save_image(overlay_image.float() / 255.0, save_path + "/overlay_estimated.png")
-            # breakpoint()
 
-        # compute EPE at optical flow level
-        #losses['optical_flow']  = compute_optical_flow_loss(of_model, im, curr_data, prev_data)
-
+       
     # loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
     #                 'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 4.0}
     loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
@@ -605,7 +592,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_10_cams_masked_disable_other_regularizer'
+exp_name = 'exp_of_10_cams_base'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
