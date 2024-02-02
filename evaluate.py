@@ -38,15 +38,15 @@ def calc_metrics(rendervar, data, params, t, seq, i):
     return psnr, ssim
 
 
-def evaluate(seq, exp):
+def evaluate(seq, exp, timestep):
     md = json.load(open(f"{dataset_path}/data/{seq}/test_meta.json", 'r'))  # metadata
-    params = dict(np.load(f"{param_path}/src/output/{exp}/{seq}/params.npz"))
+    params = dict(np.load(f"{param_path}/src/output/{exp}/{seq}/{timestep}/params.npz"))
     params = {k: torch.tensor(v).cuda().float() for k, v in params.items()}
     # print(params.keys())
     psnr_arr = []
     ssim_arr = []
     seg_as_col = False
-    num_timesteps = 6#params['means3D'].shape[0]#len(md['fn'])
+    num_timesteps = params['means3D'].shape[0]#len(md['fn'])
     with torch.no_grad():
         for t in range(num_timesteps):
             dataset = get_dataset(t, md, seq)
@@ -69,12 +69,18 @@ def evaluate(seq, exp):
         print(f"Sequence: {seq} \t num_timesteps: {num_timesteps}\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}}")
 
 if __name__ == "__main__":
-    exp_names = ["exp_of_10_cams_masked_disable_other_regularizer",
-                 "exp_of_10_cams_base",
-                 "exp_of_10_cams_base_w_reg",
-                 "exp_of_10_cams_base_w_reg_and_of"]
+    # exp_names = ["exp_of_10_cams_masked_disable_other_regularizer",
+    #              "exp_of_10_cams_base",
+    #              "exp_of_10_cams_base_w_reg",
+    #              "exp_of_10_cams_base_w_reg_and_of"]
+    exp_names = [
+        "exp_of_4_cam_image_reg",
+        "exp_of_4_cam_image_reg_longer_init",
+        "exp_of_4_cam_image_reg_of"
+    ]
+    timestep = 15
     #for sequence in ["football", "juggle", "softball"]:
     for exp_name in exp_names:
         for sequence in ["football"]:# "football", "juggle", "softball", "tennis"]:
             print(f"results for {exp_name}")
-            evaluate(sequence, exp_name)
+            evaluate(sequence, exp_name, timestep)
