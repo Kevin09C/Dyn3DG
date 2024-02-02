@@ -31,6 +31,9 @@ from torchvision.models.optical_flow import raft_large, raft_small
 from torchvision.utils import flow_to_image
 import numpy as np
 import oflibpytorch as of
+from torch.nn.utils import clip_grad_norm_
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter(log_dir=sandesh_path + "/log")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # of_model = raft_small(pretrained=True, progress=False).to(device) # the
@@ -161,10 +164,11 @@ def initialize_params(seq, md, cameras):
         'log_scales': np.tile(np.log(np.sqrt(mean3_sq_dist))[..., None], (1, 3)),
         'cam_m': np.zeros((max_cams, 3)),
         'cam_c': np.zeros((max_cams, 3)),
+        'actual_means2D': torch.zeros(init_pt_cld[:, :3].shape[0], 2)
     }
     params = {k: torch.nn.Parameter(torch.tensor(v).cuda().float().contiguous().requires_grad_(True)) for k, v in
               params.items()}
-    params['actual_means2D'] = {c: torch.nn.Parameter(torch.zeros((params['means3D'].shape[0], 2)).cuda().float().contiguous().requires_grad_(True)) for c in cameras}
+    
     cam_centers = np.linalg.inv(md['w2c'][0])[:, :3, 3]  # Get scene radius
     scene_radius = 1.1 * np.max(np.linalg.norm(cam_centers - np.mean(cam_centers, 0)[None], axis=-1))
     variables = {'max_2D_radius': torch.zeros(params['means3D'].shape[0]).cuda().float(),
@@ -186,14 +190,15 @@ def initialize_optimizer(params, variables):
         'log_scales': 0.001,
         'cam_m': 1e-4,
         'cam_c': 1e-4,
-        'actual_means2D': 1e-4,
+        'actual_means2D': 1e-1,
     }
     # just use one random camera
-    param_groups = [{'params': [(list(v.items())[0][1] if k == "actual_means2D" else v)], 'name': k, 'lr': lrs[k]} for k, v in params.items()]
+    param_groups = [{'params': [v], 'name': k, 'lr': lrs[k]} for k, v in params.items()]
     
+    return torch.optim.Adam(param_groups, lr=0.0, eps=1e-15, betas=(0.0, 0.0))
     # return torch.optim.Adam(param_groups, lr=0.0, eps=1e-15)
     # SGD does not use the second moment
-    return torch.optim.SGD(param_groups, lr=0.01)
+    # return torch.optim.Adak(param_groups, lr=0.00)
 
 def _normalize_flow(flow):
   return (flow - flow.min()) / (flow.max() - flow.min())
@@ -250,8 +255,9 @@ def calculate_epe(gt_flow, estimated_flow):
     error_vector = gt_flow - estimated_flow
 
     # Calculate the squared Euclidean distance
-    squared_distance = torch.sum(error_vector**2, dim=1)
-
+    # add eps to stabilize training :)
+    squared_distance = torch.sum((error_vector + 1e-6)**2, dim=1)
+    # breakpoint()
     # Take the square root to get the EPE
     epe = torch.sqrt(squared_distance)
 
@@ -302,6 +308,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
     losses['im'] = 0.8 * l1_loss_v1(im, curr_data['im']) + 0.2 * (1.0 - calc_ssim(im, curr_data['im']))
     variables['actual_means2D'] = rendervar['actual_means2D']  # Gradient only accum from colour render for densification
+    params['actual_means2D'] = rendervar['actual_means2D']
+
     # variables['means2D'] = torch.zeros_like(rendervar['actual_means2D'], requires_grad=True, device="cuda") + 0
      # TODO: needed for accumulation somewhere?
     segrendervar = params2rendervar(params, curr_id)
@@ -310,7 +318,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # contrib: [H,W,1] id of most visible per pixel
 
     visible_ids = contrib.unique().long() # [num_unique]
-    visible_means2d = rendervar['actual_means2D'][visible_ids] # [num_unique,2]
+    visible_means2d = params['actual_means2D'][visible_ids] # [num_unique,2]
     #print(curr_data['gt_flow']['flow'].shape, visible_means2d.shape)
     #print(calculate_epe(curr_data['gt_flow']['flow'], visible_means2d))
     seg, _, _, _ = Renderer(raster_settings=curr_data['cam'])(**segrendervar)
@@ -330,7 +338,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
 
         ## save means 2d as image
-        save_image_from_means2d(variables["actual_means2D"], im.shape, save_path + "/means2d.png")
+        save_image_from_means2d(params["actual_means2D"], im.shape, save_path + "/means2d.png")
 
         if  False: # not is_initial_timestep:
             # calculate optical flow from the difference in visible means2d
@@ -419,7 +427,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
         flow = flow * mask
         gt_flow = curr_data['gt_flow'] * mask
         flow_loss = calculate_epe(gt_flow, flow)
-        breakpoint()
+        # breakpoint()
         losses['optical_flow'] = flow_loss
         # save images of outliers
         if i % 10 == 0: #flow_loss > 0.5
@@ -456,7 +464,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # loss_weights = {'im': 1.0, 'rigid': 4.0, 'rot': 4.0, 'iso': 2.0, 'floor': 2.0, 'bg': 20.0,
     #                 'soft_col_cons': 0.01, 'seg': 3.0, 'optical_flow': 1.0}
         loss_weights = {'im': 0.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
-                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.004}
+                    'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 1}
     else:
         loss_weights = {'im': 1.0, 'rigid': 0.0, 'rot': 0.0, 'iso': 0.0, 'floor': 0.0, 'bg': 00.0,
                     'soft_col_cons': 0.00, 'seg': 0.0, 'optical_flow': 0.000}    
@@ -475,8 +483,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # variables[f'means2D_last_{t}'] = rendervar['actual_means2D']
 
     variables["means2D_store"][curr_id] = rendervar['actual_means2D']
-    params['actual_means2D'][curr_id] = rendervar['actual_means2D']
-
+    variables['last_cam_id'] = curr_id
     # breakpoint()
     return loss, variables
 
@@ -498,10 +505,9 @@ def initialize_per_timestep(params, variables, optimizer):
     rot = torch.nn.functional.normalize(params['unnorm_rotations'])
     new_pts = pts + (pts - variables["prev_pts"]) # note(sandesh): i don't understand why they are using this difference here
     # try adding the same for means2d
-    new_means2d = {}
     detached_means2d = {}
-    for camera_id, means2d in params['actual_means2D'].items() :
-        new_means2d[camera_id] = means2d + (means2d - variables["prev_means2d_store"][camera_id])
+    for camera_id, means2d in variables['means2D_store'].items() :
+        # new_means2d[camera_id] = means2d + (means2d - variables["prev_means2d_store"][camera_id])
         detached_means2d[camera_id] = means2d.detach()
 
     new_rot = torch.nn.functional.normalize(rot + (rot - variables["prev_rot"]))
@@ -517,6 +523,7 @@ def initialize_per_timestep(params, variables, optimizer):
     variables["prev_pts"] = pts.detach()
     variables["prev_rot"] = rot.detach()
     variables["prev_means2d_store"] = detached_means2d
+    new_means2d = torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0
 
     new_params = {'means3D': new_pts, 'unnorm_rotations': new_rot, 'actual_means2D': new_means2d}
     params = update_params_and_optimizer(new_params, params, optimizer)
@@ -540,10 +547,7 @@ def initialize_post_first_timestep(params, variables, optimizer, num_knn=20):
     variables["init_bg_rot"] = init_bg_rot.detach()
     variables["prev_pts"] = params['means3D'].detach()
     variables["prev_rot"] = torch.nn.functional.normalize(params['unnorm_rotations']).detach()
-    detached_means2d = {}
-    for k,v in params["actual_means2D"].items():
-        detached_means2d[k] = v.detach()
-    variables["prev_means2d_store"] = detached_means2d
+   
     params_to_fix = ['logit_opacities', 'log_scales', 'cam_m', 'cam_c']
     for param_group in optimizer.param_groups:
         if param_group["name"] in params_to_fix:
@@ -581,9 +585,9 @@ def train(seq, exp):
     print("Initating Training")
     img_number = 0 #NOTE: TO DELETE
 
+    total_step_count = 0
 
-
-    for t in range(7):#range(num_timesteps):
+    for t in range(num_timesteps):
         curr_dataset = get_dataset(t, md, seq, cameras)
         todo_curr_dataset = []
         # todo_prev_dataset = []
@@ -591,7 +595,9 @@ def train(seq, exp):
         is_initial_timestep = (t == 0)
         if not is_initial_timestep:
             params, variables = initialize_per_timestep(params, variables, optimizer)
-        num_iter_per_timestep = 10 if is_initial_timestep else 10
+            # torch.autograd.set_detect_anomaly(True)
+
+        num_iter_per_timestep = 1000 if is_initial_timestep else 300
         progress_bar = tqdm(range(num_iter_per_timestep), desc=f"timestep {t}")
         for i in range(num_iter_per_timestep):
             # if is_initial_timestep:
@@ -601,17 +607,27 @@ def train(seq, exp):
             #     prev_data, curr_data = get_curr_and_prev_batch(todo_curr_dataset, todo_prev_dataset, curr_dataset, prev_dataset)
             camera_id = curr_data['id']
             loss, variables = get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t, img_number, exp, camera_id)
+            writer.add_scalar("Loss/train", loss, total_step_count)
             loss.backward()
+            # if t == 1 and i == 20:
+            #     breakpoint()
             if i == 1999:
               img_number += 1
             with torch.no_grad():
                 report_progress(params, curr_dataset[0], i, progress_bar, camera_id)
                 if is_initial_timestep:
                     params, variables = densify(params, variables, optimizer, i)
+                clip_grad_norm_(params.values(), max_norm=1.0)
+                if params['actual_means2D'].grad is not None and not params['actual_means2D'].grad.isfinite().all():
+                    print(f"nan found in means2D tensor: {params['actual_means2D'].grad}")
+                    torch.autograd.set_detect_anomaly(True)
+
+                # then use torch.autograd.set_detect_anomaly(True) to debug
                 # breakpoint()
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-                
+            total_step_count += 1
+        writer.flush()
         progress_bar.close()
         output_params.append(params2cpu(params, is_initial_timestep))
         if is_initial_timestep:
@@ -619,7 +635,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_1_cam_only_of'
+exp_name = 'exp_of_1_cam_only_of_fixed_grad2'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     torch.cuda.empty_cache()
@@ -627,3 +643,4 @@ for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     train(sequence, exp_name)
     torch.cuda.empty_cache()
     #/content/gdrive/MyDrive/Dyn3DG/data/basketball/epipolar_error_png/1/00000.png
+writer.close()
