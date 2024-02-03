@@ -653,7 +653,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_10_cam_image_reg_of_seperate_new_with_'
+exp_name = 'exp_of_10_cam_image_reg_of_seperate_fixed'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     torch.cuda.empty_cache()
