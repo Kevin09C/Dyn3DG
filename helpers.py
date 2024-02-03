@@ -32,6 +32,11 @@ def setup_camera(w, h, k, w2c, near=0.01, far=100):
 
 
 def params2rendervar(params, camera_id):
+    if "actual_means2D" not in params:
+        # print("actual_means2D not in params, setting to 0")
+        means2d = torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0
+    else:
+        means2d = params['actual_means2D']
     # if camera_id in params["actual_means2D"]:
     #     means2d = params['actual_means2D'][camera_id]
     # else:
@@ -45,7 +50,7 @@ def params2rendervar(params, camera_id):
         'scales': torch.exp(params['log_scales']),
         # 'means2D': torch.zeros_like(params['means3D'], requires_grad=True, device="cuda") + 0,
         # 'actual_means2D': torch.zeros((params['means3D'].shape[0], 2), requires_grad=True, device="cuda") + 0,
-        'actual_means2D': params['actual_means2D']
+        'actual_means2D': means2d
     }
     return rendervar
 
