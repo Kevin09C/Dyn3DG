@@ -380,7 +380,7 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     # there is no optical flow at time step 0, therefore we rely on the segmentation masks
     losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['seg']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['seg']))
 
-    # USE_OPTICAL_FLOW = True
+    # USE_OPTICAL_FLOW = False
     # first two thirds iterations: no optical flow, then use optical flow
     USE_OPTICAL_FLOW = True if i > int(0.66 * num_iter_per_timestep) else False
 
@@ -504,8 +504,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
     return loss, variables
 
 def compute_optical_flow_gaussians(visible_means2d: torch.Tensor, visible_means2d_prev: torch.Tensor, img_shape: torch.Tensor) -> torch.Tensor:
-    # diff = visible_means2d - visible_means2d_prev # [num_unique, 2]
-    diff = visible_means2d_prev - visible_means2d
+    diff = visible_means2d - visible_means2d_prev # [num_unique, 2]
+    # diff = visible_means2d_prev - visible_means2d
     optical_flow = torch.zeros([2, img_shape[1], img_shape[2]], device=visible_means2d.device) # [2,H,W]
     mask = torch.zeros([img_shape[1], img_shape[2]], dtype=torch.bool, device=visible_means2d.device)
     for mean, movement in zip(visible_means2d, diff):
@@ -667,7 +667,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_10_cam_image_reg_of_seperate_fixed_more_debug'
+exp_name = 'exp_of_1_cam_image_reg_of_visualization'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     torch.cuda.empty_cache()
