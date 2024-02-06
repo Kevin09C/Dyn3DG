@@ -107,7 +107,7 @@ def get_loss(params, curr_data, variables, is_initial_timestep, seq, t, i, use_m
         losses['seg'] = 0.8 * l1_loss_v1(seg, curr_data['sam_mask']) + 0.2 * (1.0 - calc_ssim(seg, curr_data['sam_mask']))
 
     if (t == 0 and i == 9999) or (t > 0 and i == 1999):
-        save_image(im, f'./data/{seq}/sam_mask_exp/img/timestep_{t}_img_{i}.png')
+        save_image(im, f'./data/{seq}/last_hurrah/img/timestep_{t}_img_{i}.png')
 
     if not is_initial_timestep:
         is_fg = (params['seg_colors'][:, 0] > 0.5).detach()
@@ -237,7 +237,7 @@ def train(seq, exp):
 
 
 if __name__ == "__main__":
-    exp_name = "sam_seg_2"
-    for sequence in ["basketball"]:
+    exp_name = "last_hurrah"
+    for sequence in ["boxes"]:
         train(sequence, exp_name)
         torch.cuda.empty_cache()

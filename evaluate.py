@@ -11,6 +11,9 @@ from helpers import setup_camera, l1_loss_v1, l1_loss_v2, weighted_l2_loss_v1, w
     o3d_knn, params2rendervar, params2cpu, save_params
 from external import calc_ssim, calc_psnr, build_rotation, densify, update_params_and_optimizer
 from torchvision.utils import save_image
+import lpips
+
+LIPIS_LOSS = lpips.LPIPS(net='vgg').cuda() # closer to "traditional" perceptual loss, when used for optimization
 
 def get_dataset(t, md, seq):
     dataset = []
@@ -29,10 +32,11 @@ def calc_metrics(rendervar, data, params, t, seq, i):
     im, _, _, = Renderer(raster_settings=data['cam'])(**rendervar)
     curr_id = data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
-    save_image(im, f'./data/{seq}/rendered/sam_seg/timestep_{t}_img_{i}.png')
+    #save_image(im, f'./data/{seq}/rendered/last_hurrah/timestep_{t}_img_{i}.png')
     psnr = calc_psnr(im, data['im']).mean().item()
     ssim = calc_ssim(im, data['im']).mean().item()
-    return psnr, ssim
+    lpips = LIPIS_LOSS(im.cuda(), data['im'].cuda()).mean().cpu().item()
+    return psnr, ssim, lpips
 
 
 def evaluate(seq, exp):
@@ -43,6 +47,7 @@ def evaluate(seq, exp):
     print(params.keys())
     psnr_arr = []
     ssim_arr = []
+    lp_arr = []
     seg_as_col = False
     with torch.no_grad():
         for t in range(num_timesteps):
@@ -57,15 +62,17 @@ def evaluate(seq, exp):
             }
             for i in range(len(dataset)):
                 curr_data = dataset[i]
-                psnr, ssim = calc_metrics(rendervar, curr_data, params, t, seq, i)
+                psnr, ssim, lp = calc_metrics(rendervar, curr_data, params, t, seq, i)
                 psnr_arr.append(psnr)
                 ssim_arr.append(ssim)
+                lp_arr.append(lp)
         avg_psnr = sum(psnr_arr)/len(psnr_arr)
         avg_ssim = sum(ssim_arr)/len(ssim_arr)
-        print(f"Sequence: {seq} \t\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}}")
+        avg_lp = sum(lp_arr)/len(lp_arr)
+        print(f"Sequence: {seq} \t\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}} \t LPIPS: {avg_lp:.{7}}")
 
 if __name__ == "__main__":
-    exp_name = "sam_seg_2"
+    exp_name = "exp1"
     #for sequence in ["football", "juggle", "softball"]:
-    for sequence in ["basketball"]:# "football", "juggle", "softball", "tennis"]:
+    for sequence in ["basketball", "boxes", "football", "juggle", "softball", "tennis"]:
         evaluate(sequence, exp_name)
