@@ -1,4 +1,4 @@
-# Optical flow guided Dynamic 3D Gaussians for novel dynamic scene synthesis
+# Dynamic 3D Gaussians with Optical Flow Regularization and Segmentation Masks from Natural Langauge Prompts
 
 Based on [Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/) 
 
