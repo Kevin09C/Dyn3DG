@@ -2,7 +2,9 @@
 
 Based on [Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/) 
 
-Follow the instructions on [this repo](https://github.com/JonathonLuiten/Dynamic3DGaussians) to download the rasterizer, install dependencies, and get the data. 
+Follow the instructions on [this repo](https://github.com/JonathonLuiten/Dynamic3DGaussians) to install dependencies, and get the data. As we modified the rasterizer, we included it already in this repo. So you just need to install it, but not download the repo.
+
+Please note that the rasterizer has a pretty [restrictive license](https://github.com/graphdeco-inria/gaussian-splatting?tab=License-1-ov-file#readme) that applies to this part of the code. This license is also present within the subfolder.
 
 ##  Segmentation Masks with GroundingDINO and SAM
 
