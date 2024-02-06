@@ -43,6 +43,8 @@ Predict optical flows
 python scripts/generate_flow.py --dataset_path ${SCENE_DIR} --model weights/raft-things.pth
 ```
 
+Generate masks using optical flow
+
 ```bash
 python scripts/generate_mask.py --dataset_path ${SCENE_DIR}
 ```
