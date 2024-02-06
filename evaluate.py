@@ -79,17 +79,7 @@ if __name__ == "__main__":
                  "exp_of_10_cams_base",
                  "exp_of_10_cams_base_w_reg",
                  "exp_of_10_cams_base_w_reg_and_of"]
-    # exp_names = [
-    #     # "exp_of_4_cam_image_reg",
-    #     # "exp_of_4_cam_image_reg_longer_init",
-    #     "exp_of_4_cam_image_reg_of",
-    #     # #
-    #     # "exp_of_10_cam_image_reg_of_after_1000_flipped",
-    #             #  "exp_of_10_cam_image_reg_base_new",
-    #              "exp_of_4_cam_image_reg_base"
-    #              ]
     timestep = None
-    #for sequence in ["football", "juggle", "softball"]:
     for exp_name in exp_names:
         for sequence in ["football"]:# "football", "juggle", "softball", "tennis"]:
             print(f"results for {exp_name}")
