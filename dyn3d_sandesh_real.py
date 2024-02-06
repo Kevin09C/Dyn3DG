@@ -333,6 +333,8 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
 
         ## save means 2d as image
         save_image_from_means2d(rendervar["actual_means2D"], im.shape, save_path + "/means2d.png")
+        visible_ids = contrib.unique().long() # [num_unique]
+        save_image_from_means2d(rendervar["actual_means2D"][visible_ids], im.shape, save_path + "/visible_means2d.png")
 
         if  False: # not is_initial_timestep:
             # calculate optical flow from the difference in visible means2d
@@ -373,7 +375,6 @@ def get_loss(params, curr_data, prev_data, variables, is_initial_timestep, i, t,
             save_image(flow_arrow_image_gt.float() / 255.0, save_path + "/flow_arrow_gt.png")
 
             # save visible means to disk for comparison
-            save_image_from_means2d(visible_means2d, im.shape, save_path + "/visible_means2d.png")
             save_image_from_means2d(previous_visible_means2d, im.shape, save_path + "/previous_visible_means2d.png")
             save_image_from_means2d(first_visible_means2d, im.shape, save_path + "/first_visible_means2d.png")
             
@@ -594,8 +595,9 @@ def train(seq, exp):
      ## define camera subset to use
     # lets have reproducible results
     seed(42)
-    num_cams = 10
+    num_cams = 4
     cameras = sample(range(len(md['fn'][0])), num_cams)
+    # cameras = [3]
     print("using cameras ", cameras)
     params, variables = initialize_params(seq, md, cameras)
     optimizer = initialize_optimizer(params, variables)
@@ -667,7 +669,7 @@ def train(seq, exp):
         # save params every iteration
         save_params(output_params, seq, exp)
 
-exp_name = 'exp_of_1_cam_image_reg_of_visualization'
+exp_name = 'exp_of_4_cam_image_reg_of'
 # "basketball", "boxes", 
 for sequence in ["football"]:#, "juggle", "softball", "tennis"]:
     torch.cuda.empty_cache()

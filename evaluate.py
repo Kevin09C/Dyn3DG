@@ -28,11 +28,14 @@ def get_dataset(t, md, seq):
 
 
 
-def calc_metrics(rendervar, data, params, t, seq, i):
+def calc_metrics(rendervar, data, params, t, seq, i, exp):
     im, _, _, _ = Renderer(raster_settings=data['cam'])(**rendervar)
     curr_id = data['id']
     im = torch.exp(params['cam_m'][curr_id])[:, None, None] * im + params['cam_c'][curr_id][:, None, None]
-    # save_image(im, f'{dataset_path}/data/{seq}/rendered/reproduce/timestep_{t}_img_{i}.png')
+    path = f"{param_path}/src/output/{exp}/{seq}/{timestep}/validation/timestep_{t}_img_{i}_cam{curr_id}.png"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    save_image(im, path)
+    print("saving image to ", path)
     psnr = calc_psnr(im, data['im']).mean().item()
     ssim = calc_ssim(im, data['im']).mean().item()
     return psnr, ssim
@@ -40,7 +43,10 @@ def calc_metrics(rendervar, data, params, t, seq, i):
 
 def evaluate(seq, exp, timestep):
     md = json.load(open(f"{dataset_path}/data/{seq}/test_meta.json", 'r'))  # metadata
-    params = dict(np.load(f"{param_path}/src/output/{exp}/{seq}/{timestep}/params.npz"))
+    if timestep is not None:
+        params = dict(np.load(f"{param_path}/src/output/{exp}/{seq}/{timestep}/params.npz"))
+    else:
+        params = dict(np.load(f"{param_path}/src/output/{exp}/{seq}/params.npz"))
     params = {k: torch.tensor(v).cuda().float() for k, v in params.items()}
     # print(params.keys())
     psnr_arr = []
@@ -61,7 +67,7 @@ def evaluate(seq, exp, timestep):
             }
             for i in range(len(dataset)):
                 curr_data = dataset[i]
-                psnr, ssim = calc_metrics(rendervar, curr_data, params, t, seq, i)
+                psnr, ssim = calc_metrics(rendervar, curr_data, params, t, seq, i, exp)
                 psnr_arr.append(psnr)
                 ssim_arr.append(ssim)
         avg_psnr = sum(psnr_arr)/len(psnr_arr)
@@ -69,16 +75,20 @@ def evaluate(seq, exp, timestep):
         print(f"Sequence: {seq} \t num_timesteps: {num_timesteps}\t PSNR: {avg_psnr:.{7}} \t SSIM: {avg_ssim:.{7}}")
 
 if __name__ == "__main__":
-    # exp_names = ["exp_of_10_cams_masked_disable_other_regularizer",
-    #              "exp_of_10_cams_base",
-    #              "exp_of_10_cams_base_w_reg",
-    #              "exp_of_10_cams_base_w_reg_and_of"]
-    exp_names = [
-        "exp_of_4_cam_image_reg",
-        "exp_of_4_cam_image_reg_longer_init",
-        "exp_of_4_cam_image_reg_of"
-    ]
-    timestep = 15
+    exp_names = ["exp_of_10_cams_masked_disable_other_regularizer",
+                 "exp_of_10_cams_base",
+                 "exp_of_10_cams_base_w_reg",
+                 "exp_of_10_cams_base_w_reg_and_of"]
+    # exp_names = [
+    #     # "exp_of_4_cam_image_reg",
+    #     # "exp_of_4_cam_image_reg_longer_init",
+    #     "exp_of_4_cam_image_reg_of",
+    #     # #
+    #     # "exp_of_10_cam_image_reg_of_after_1000_flipped",
+    #             #  "exp_of_10_cam_image_reg_base_new",
+    #              "exp_of_4_cam_image_reg_base"
+    #              ]
+    timestep = None
     #for sequence in ["football", "juggle", "softball"]:
     for exp_name in exp_names:
         for sequence in ["football"]:# "football", "juggle", "softball", "tennis"]:
