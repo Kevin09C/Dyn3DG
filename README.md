@@ -4,10 +4,10 @@ Based on [Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/)
 
 Follow the instructions on [this repo](https://github.com/JonathonLuiten/Dynamic3DGaussians) to download the rasterizer, install dependencies, and get the data. 
 
-## Getting started with Segmentation Masks
+##  Segmentation Masks with GroundingDINO and SAM
 You will need to install [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [SAM](https://github.com/facebookresearch/segment-anything) to get started with segmentation mask generation. After installing them, go inside the subdirectory GroundingDINO and create a folder called weights. 
 
-You should then proceed by executing to download the pretrained models and generate the saegmenation masks.
+You should proceed by downloading the pretrained models, then generating the saegmenation masks.
 
 ```bash
 wget -q https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
@@ -16,15 +16,8 @@ python generate_masks_with_sam.py
 ```
 
 
-To train the model execute "
-```bash
-python train.py
-```
-To evaluate a trained model execute 
 
-```bash
-python execute.py
-```
+## Segmentation masks from optical flow
 To generate segmentation masks from the optical flow, follow the following steps. 
 
 First, make sure that you are at the root of the repo, then execute the following commands to download the pretrained optical flow models.
@@ -47,4 +40,16 @@ Generate masks using optical flow
 
 ```bash
 python scripts/generate_mask.py --dataset_path ${SCENE_DIR}
+```
+
+# Training and evaluating a Dynamic 3D Gaussian model
+
+To train the model execute "
+```bash
+python train.py
+```
+
+To evaluate a trained model execute 
+```bash
+python execute.py
 ```
