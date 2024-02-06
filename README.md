@@ -1,4 +1,4 @@
-# Optical flow guided Dynamic 3D Gaussians for novel dynamic scene synthesis
+# Dynamic 3D Gaussians with Optical Flow Regularization and Segmentation Masks from Natural Langauge Prompts
 
 Based on [Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/) 
 
@@ -7,6 +7,7 @@ Follow the instructions on [this repo](https://github.com/JonathonLuiten/Dynamic
 ##  Segmentation Masks with GroundingDINO and SAM
 
 NOTE: the code to generate the segmentation masks from GroudingDINO and SAM is located on the sam_gaussians branch. We recommend to use that branch to generate segmentation masks.
+
 You will need to install [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) and [SAM](https://github.com/facebookresearch/segment-anything) to get started with segmentation mask generation. After installing them, go inside the subdirectory GroundingDINO and create a folder called weights. 
 
 You should proceed by downloading the pretrained models, then generating the saegmenation masks.
