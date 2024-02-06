@@ -47,7 +47,7 @@ python scripts/generate_mask.py --dataset_path ${SCENE_DIR}
 
 # Training and evaluating a Dynamic 3D Gaussian model
 
-To train the model execute "
+To train the model execute
 ```bash
 python train.py
 ```
