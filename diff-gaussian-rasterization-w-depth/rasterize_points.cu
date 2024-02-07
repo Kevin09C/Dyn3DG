@@ -94,7 +94,6 @@ RasterizeGaussiansCUDA(
 	  size_t chunk_size = CudaRasterizer::required<CudaRasterizer::GeometryState>(P);
 	  char* chunkptr_gpu = geomFunc(chunk_size);
 	  CudaRasterizer::GeometryState geomState = CudaRasterizer::GeometryState::fromChunk(chunkptr_gpu, P);
-	 //cudaMemcpy(means2D.data_ptr<float>(), geomState.means2D, P * 2 * sizeof(float), cudaMemcpyHostToDevice);
 	  cudaMemset(geomState.means2D, 0, P * 2 * sizeof(float));
 
 	  rendered = CudaRasterizer::Rasterizer::forward(
@@ -133,7 +132,6 @@ RasterizeGaussiansCUDA(
 		// now get geometrystate that is on cpu
   		std::function<char*(size_t)> geomBufferCpuFunctional = resizeFunctional(geomBuffer_cpu);
 		
-		// size_t chunk_size = CudaRasterizer::required<CudaRasterizer::GeometryState>(P);
 		char* chunkptr = geomBufferCpuFunctional(chunk_size);
 		CudaRasterizer::GeometryState geomState_cpu = CudaRasterizer::GeometryState::fromChunk(chunkptr, P);
 
